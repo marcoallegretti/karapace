@@ -1,0 +1,37 @@
+[package]
+name = "karapace-cli"
+description = "CLI interface for Karapace deterministic environment engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "karapace"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+clap_complete.workspace = true
+clap_mangen.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+indicatif.workspace = true
+console.workspace = true
+libc.workspace = true
+karapace-schema = { path = "../karapace-schema" }
+karapace-core = { path = "../karapace-core" }
+karapace-store = { path = "../karapace-store" }
+karapace-runtime = { path = "../karapace-runtime" }
+karapace-tui = { path = "../karapace-tui" }
+karapace-remote = { path = "../karapace-remote" }
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true
