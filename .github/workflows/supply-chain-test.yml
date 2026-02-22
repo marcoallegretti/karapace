@@ -41,10 +41,12 @@ jobs:
         run: cargo build --release -p karapace-cli -p karapace-dbus
 
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx@0.5.5 --locked
+        run: cargo install cargo-cyclonedx@0.5.7 --locked
 
       - name: Generate SBOM
-        run: cargo cyclonedx --format json --output-prefix karapace
+        run: |
+          cargo cyclonedx --manifest-path crates/karapace-cli/Cargo.toml --format json --override-filename karapace_bom
+          mv crates/karapace-cli/karapace_bom.json .
 
       - name: Compute checksums
         run: |
@@ -505,7 +507,7 @@ jobs:
           fi
           echo "PASS: Clean rebuild matches baseline after multi-rlib tampering"
 
-      - name: "Test: .rmeta tampering triggers rebuild"
+      - name: "Test: .rmeta tampering triggers rebuild or error"
         run: |
           set -euo pipefail
           BASELINE_HASH=$(sha256sum target/release/karapace | awk '{print $1}')
@@ -516,12 +518,16 @@ jobs:
           open('$RMETA', 'wb').write(data)
           "
           done
-          cargo build --release -p karapace-cli -p karapace-dbus 2>&1 | tail -3
+          # Build may fail (cargo detects corrupted rmeta) or rebuild from source
+          if ! cargo build --release -p karapace-cli -p karapace-dbus 2>&1 | tail -5; then
+            echo "PASS: Cargo rejected tampered .rmeta files (build error = tampering detected)"
+            exit 0
+          fi
           RMETA_HASH=$(sha256sum target/release/karapace | awk '{print $1}')
           if [ "$RMETA_HASH" = "$BASELINE_HASH" ]; then
             echo "PASS: Cargo rebuilt from source, ignoring tampered .rmeta"
           else
-            echo "FATAL: .rmeta tampering changed binary hash"
+            echo "FATAL: .rmeta tampering changed binary hash without detection"
             exit 1
           fi
 

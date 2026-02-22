@@ -45,9 +45,11 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --workspace --target ${{ matrix.target }}
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx@0.5.5 --locked
+        run: cargo install cargo-cyclonedx@0.5.7 --locked
       - name: Generate SBOM
-        run: cargo cyclonedx --format json --all
+        run: |
+          cargo cyclonedx --manifest-path crates/karapace-cli/Cargo.toml --format json --override-filename karapace_bom
+          mv crates/karapace-cli/karapace_bom.json .
       - name: Compute and verify checksums
         run: |
           cd target/${{ matrix.target }}/release
@@ -55,13 +57,12 @@ jobs:
           sha256sum -c SHA256SUMS
       - name: Validate SBOM
         run: |
-          SBOM=$(find crates/karapace-cli -name '*.cdx.json' | head -1)
           python3 -c "
           import json
-          with open('$SBOM') as f:
+          with open('karapace_bom.json') as f:
               bom = json.load(f)
           assert 'components' in bom and len(bom['components']) > 0
-          print(f'SBOM valid: {len(bom[\"components\"])} components')
+          print(f'SBOM valid: {len(bom["components"])} components')
           "
       - name: Verify static linking (musl only)
         if: contains(matrix.target, 'musl')
