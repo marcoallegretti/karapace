@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.karapace.Manager1
+Exec=/usr/bin/karapace-dbus
+SystemdService=karapace-dbus.service

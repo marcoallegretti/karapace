@@ -1,0 +1,20 @@
+# Developer environment — common CLI tools for software development.
+# Includes Git, build tools, and editors. No GUI.
+#
+# Usage:
+#   karapace build examples/dev.toml
+#   karapace enter <env_id>
+
+manifest_version = 1
+
+[base]
+image = "rolling"    # openSUSE Tumbleweed
+
+[system]
+packages = ["git", "curl", "vim", "neovim", "tmux", "htop", "make", "cmake", "gcc", "clang"]
+
+[mounts]
+workspace = "~/projects:/workspace"
+
+[runtime]
+backend = "namespace"

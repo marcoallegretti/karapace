@@ -1,0 +1,28 @@
+# GUI development environment — desktop app development with full host integration.
+# Includes GPU, audio, Wayland/X11 passthrough, and common GUI libraries.
+#
+# Usage:
+#   karapace build examples/gui-dev.toml
+#   karapace enter <env_id>
+#   karapace export-app <env_id> my-app /usr/bin/my-app
+
+manifest_version = 1
+
+[base]
+image = "rolling"    # openSUSE Tumbleweed
+
+[system]
+packages = ["git", "curl", "cmake", "gcc", "clang", "gdb", "mesa-dri-devel"]
+
+[gui]
+apps = ["firefox"]
+
+[hardware]
+gpu = true
+audio = true
+
+[mounts]
+workspace = "~/projects:/workspace"
+
+[runtime]
+backend = "namespace"

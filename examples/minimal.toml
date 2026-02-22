@@ -1,0 +1,14 @@
+# Minimal Karapace environment — just a base system, no extras.
+# Good for testing or as a starting point.
+#
+# Usage:
+#   karapace build examples/minimal.toml
+#   karapace enter <env_id>
+
+manifest_version = 1
+
+[base]
+image = "rolling"    # openSUSE Tumbleweed
+
+[runtime]
+backend = "namespace"

@@ -1,0 +1,22 @@
+[Unit]
+Description=Karapace Environment Manager D-Bus Service
+Documentation=https://github.com/karapace/karapace
+
+[Service]
+Type=dbus
+BusName=org.karapace.Manager1
+ExecStart=/usr/bin/karapace-dbus
+# The service implements a 30s idle timeout internally;
+# systemd will restart it on the next D-Bus activation.
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=2
+# Security hardening
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/karapace
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

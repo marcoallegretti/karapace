@@ -1,0 +1,20 @@
+# Rust development environment — ready for Rust/Cargo development.
+#
+# Usage:
+#   karapace build examples/rust-dev.toml
+#   karapace enter <env_id>
+#   # Then inside: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+manifest_version = 1
+
+[base]
+image = "rolling"    # openSUSE Tumbleweed
+
+[system]
+packages = ["git", "curl", "gcc", "make", "cmake", "pkg-config", "openssl-devel", "gdb"]
+
+[mounts]
+workspace = "~/projects:/workspace"
+
+[runtime]
+backend = "namespace"
