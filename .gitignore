@@ -1,0 +1,8 @@
+target/
+docu_dev/
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.windsurf/

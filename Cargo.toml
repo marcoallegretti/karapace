@@ -1,0 +1,90 @@
+[workspace]
+members = [
+  "crates/karapace-schema",
+  "crates/karapace-store",
+  "crates/karapace-runtime",
+  "crates/karapace-core",
+  "crates/karapace-cli",
+  "crates/karapace-dbus",
+  "crates/karapace-tui",
+  "crates/karapace-remote",
+  "crates/karapace-server",
+]
+default-members = [
+  "crates/karapace-schema",
+  "crates/karapace-store",
+  "crates/karapace-runtime",
+  "crates/karapace-core",
+  "crates/karapace-cli",
+  "crates/karapace-server",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "EUPL-1.2"
+repository = "https://github.com/marcoallegretti/karapace"
+homepage = "https://github.com/marcoallegretti/karapace"
+description = "Deterministic environment engine for immutable Linux systems"
+keywords = ["container", "deterministic", "immutable", "environment", "linux"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_qualifications = "warn"
+elided_lifetimes_in_paths = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pedantic overrides — allow where it hurts readability more than it helps
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+items_after_statements = "allow"
+wildcard_imports = "warn"
+redundant_closure_for_method_calls = "warn"
+manual_string_new = "warn"
+needless_pass_by_value = "warn"
+implicit_clone = "warn"
+uninlined_format_args = "warn"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "warn"
+
+[profile.release]
+strip = true
+lto = "thin"
+incremental = false
+
+[workspace.dependencies]
+blake3 = "1.5"
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
+clap_mangen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+toml = "0.8"
+tempfile = "3.14"
+fs2 = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+ctrlc = "3.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+indicatif = "0.17"
+console = "0.15"
+libc = "0.2"
+notify-rust = "4"
+ratatui = "0.29"
+crossterm = "0.28"
+tar = "0.4"
+ureq = "3"
+zbus = "5"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+tiny_http = "0.12"
