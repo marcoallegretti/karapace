@@ -1,0 +1,21 @@
+[package]
+name = "karapace-runtime"
+description = "Container runtime backends, image management, sandbox, and host integration for Karapace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+libc.workspace = true
+tracing.workspace = true
+tempfile.workspace = true
+karapace-schema = { path = "../karapace-schema" }
+karapace-store = { path = "../karapace-store" }
