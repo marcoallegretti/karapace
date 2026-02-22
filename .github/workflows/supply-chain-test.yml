@@ -92,7 +92,7 @@ jobs:
       # --- Provenance attestation ---
       - name: Generate provenance attestation
         run: |
-          cat > /tmp/provenance.json << EOF
+          cat > provenance.json << EOF
           {
             "_type": "https://in-toto.io/Statement/v0.1",
             "predicateType": "https://slsa.dev/provenance/v0.2",
@@ -145,14 +145,14 @@ jobs:
           }
           EOF
           echo "Provenance attestation generated"
-          python3 -c "import json; json.load(open('/tmp/provenance.json')); print('Valid JSON')"
+          python3 -c "import json; json.load(open('provenance.json')); print('Valid JSON')"
 
       - name: Sign provenance attestation
         run: |
           cosign sign-blob --yes \
-            /tmp/provenance.json \
-            --output-signature /tmp/provenance.json.sig \
-            --output-certificate /tmp/provenance.json.crt
+            provenance.json \
+            --output-signature provenance.json.sig \
+            --output-certificate provenance.json.crt
 
       - name: Upload all artifacts
         uses: actions/upload-artifact@v4
@@ -169,9 +169,9 @@ jobs:
             karapace_bom.json
             karapace_bom.json.sig
             karapace_bom.json.crt
-            /tmp/provenance.json
-            /tmp/provenance.json.sig
-            /tmp/provenance.json.crt
+            provenance.json
+            provenance.json.sig
+            provenance.json.crt
 
   verify-signatures:
     name: Verify Signatures & Provenance
@@ -230,9 +230,9 @@ jobs:
       - name: Verify provenance attestation signature
         run: |
           cosign verify-blob \
-            artifacts/tmp/provenance.json \
-            --signature artifacts/tmp/provenance.json.sig \
-            --certificate artifacts/tmp/provenance.json.crt \
+            artifacts/provenance.json \
+            --signature artifacts/provenance.json.sig \
+            --certificate artifacts/provenance.json.crt \
             --certificate-identity-regexp 'https://github.com/marcoallegretti/karapace' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           echo "Provenance attestation signature: VERIFIED"
@@ -241,7 +241,7 @@ jobs:
       - name: Verify provenance content matches this build
         run: |
           set -euo pipefail
-          PROV=$(cat artifacts/tmp/provenance.json)
+          PROV=$(cat artifacts/provenance.json)
 
           # Verify commit SHA
           PROV_SHA=$(echo "$PROV" | python3 -c "import sys,json; print(json.load(sys.stdin)['predicate']['invocation']['configSource']['digest']['sha1'])")
@@ -534,6 +534,9 @@ jobs:
       - name: "Test: .d file tampering does not affect binary"
         run: |
           set -euo pipefail
+          # Clean rebuild to reset state after rmeta tampering
+          cargo clean
+          cargo build --release -p karapace-cli -p karapace-dbus
           BASELINE_HASH=$(sha256sum target/release/karapace | awk '{print $1}')
           for D_FILE in $(find target/release/deps -name 'karapace_*.d' | head -5); do
             echo "TAMPERED_MARKER" >> "$D_FILE"
