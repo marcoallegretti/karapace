@@ -1,0 +1,62 @@
+name: 'Karapace Build'
+description: 'Build a Karapace environment from a manifest file'
+inputs:
+  manifest:
+    description: 'Path to the karapace.toml manifest file'
+    required: true
+    default: 'karapace.toml'
+  name:
+    description: 'Optional name for the environment'
+    required: false
+  karapace-version:
+    description: 'Version of Karapace to install (or "latest")'
+    required: false
+    default: 'latest'
+  store-path:
+    description: 'Path to the Karapace store directory'
+    required: false
+    default: '/tmp/karapace-store'
+outputs:
+  env-id:
+    description: 'The environment ID of the built environment'
+    value: ${{ steps.build.outputs.env_id }}
+  short-id:
+    description: 'The short ID of the built environment'
+    value: ${{ steps.build.outputs.short_id }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Install prerequisites
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq fuse-overlayfs curl
+        sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
+    - name: Install Karapace
+      shell: bash
+      run: |
+        if [ "${{ inputs.karapace-version }}" = "latest" ]; then
+          cargo install --path crates/karapace-cli --root /usr/local 2>/dev/null || \
+            cargo install karapace-cli --root /usr/local 2>/dev/null || \
+            echo "::warning::Could not install karapace; using local build"
+        fi
+
+    - name: Build environment
+      id: build
+      shell: bash
+      run: |
+        ARGS="--store ${{ inputs.store-path }} --json"
+        if [ -n "${{ inputs.name }}" ]; then
+          ARGS="$ARGS --name ${{ inputs.name }}"
+        fi
+        OUTPUT=$(karapace $ARGS build "${{ inputs.manifest }}" 2>&1) || {
+          echo "::error::Karapace build failed"
+          echo "$OUTPUT"
+          exit 1
+        }
+        echo "$OUTPUT"
+        ENV_ID=$(echo "$OUTPUT" | jq -r '.env_id // empty')
+        SHORT_ID=$(echo "$OUTPUT" | jq -r '.short_id // empty')
+        echo "env_id=$ENV_ID" >> "$GITHUB_OUTPUT"
+        echo "short_id=$SHORT_ID" >> "$GITHUB_OUTPUT"

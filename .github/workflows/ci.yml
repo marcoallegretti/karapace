@@ -1,0 +1,559 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: >-
+    -D warnings
+    --remap-path-prefix /home/runner/work=src
+    --remap-path-prefix /home/runner/.cargo/registry/src=crate
+    --remap-path-prefix /home/runner/.rustup=rustup
+  RUST_TOOLCHAIN: "1.82"
+  SOURCE_DATE_EPOCH: "0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu
+            runner: ubuntu-latest
+          - os: fedora
+            runner: ubuntu-latest
+            container: fedora:latest
+          - os: opensuse
+            runner: ubuntu-latest
+            container: opensuse/tumbleweed:latest
+    container: ${{ matrix.container || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps (Fedora)
+        if: matrix.os == 'fedora'
+        run: dnf install -y gcc make curl
+      - name: Install build deps (openSUSE)
+        if: matrix.os == 'opensuse'
+        run: zypper install -y gcc make curl gzip tar
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fuse-overlayfs curl crun
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+      - name: Verify prerequisites
+        run: |
+          echo "--- Prerequisite verification ---"
+          unshare --version
+          fuse-overlayfs --version || echo "fuse-overlayfs: $(which fuse-overlayfs)"
+          curl --version | head -1
+          crun --version | head -1
+          echo "User namespace test:"
+          unshare --user --map-root-user --fork true && echo "OK" || { echo "FAIL"; exit 1; }
+          echo "--- All prerequisites verified ---"
+      - name: Run E2E tests
+        run: cargo test --test e2e -- --ignored --test-threads=1
+      - name: Check for mount leaks
+        if: always()
+        run: |
+          if grep -q fuse-overlayfs /proc/mounts; then
+            echo "FATAL: stale fuse-overlayfs mounts detected"
+            grep fuse-overlayfs /proc/mounts
+            exit 1
+          fi
+
+  enospc:
+    name: ENOSPC Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Run ENOSPC tests (requires sudo for tmpfs)
+        run: sudo -E cargo test --test enospc -- --ignored --test-threads=1
+
+  e2e-resolve:
+    name: E2E Resolver (${{ matrix.os }})
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu
+            container: ubuntu:24.04
+            setup: "apt-get update -qq && apt-get install -y -qq build-essential curl fuse-overlayfs crun"
+          - os: fedora
+            container: fedora:latest
+            setup: "dnf install -y gcc make curl fuse-overlayfs fuse3 crun"
+          - os: opensuse
+            container: opensuse/tumbleweed:latest
+            setup: "zypper install -y gcc make curl fuse-overlayfs gzip tar crun"
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install prerequisites
+        run: ${{ matrix.setup }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Enable user namespaces
+        run: sysctl -w kernel.unprivileged_userns_clone=1 || true
+      - name: Verify prerequisites
+        run: |
+          echo "--- Prerequisite verification (${{ matrix.os }}) ---"
+          which unshare && unshare --version || true
+          which fuse-overlayfs && (fuse-overlayfs --version || true)
+          curl --version | head -1
+          unshare --user --map-root-user --fork true && echo "Namespaces: OK" || { echo "Namespaces: FAIL"; exit 1; }
+          echo "--- All prerequisites verified ---"
+      - name: Run resolver E2E tests
+        run: cargo test --test e2e e2e_resolve -- --ignored --test-threads=1
+
+  build-release:
+    name: Release Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: karapace-linux-x86_64-gnu
+          - target: x86_64-unknown-linux-musl
+            artifact: karapace-linux-x86_64-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Clean before release build
+        run: cargo clean
+      - run: cargo build --release --workspace --target ${{ matrix.target }}
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx@0.5.5 --locked
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --all
+      - name: Compute and verify checksums
+        run: |
+          cd target/${{ matrix.target }}/release
+          sha256sum karapace karapace-dbus > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          echo "SHA256 checksum verification: OK"
+      - name: Validate SBOM is valid JSON with components
+        run: |
+          SBOM=$(find crates/karapace-cli -name '*.cdx.json' | head -1)
+          python3 -c "
+          import json, sys
+          with open('$SBOM') as f:
+              bom = json.load(f)
+          assert 'components' in bom, 'SBOM missing components key'
+          assert len(bom['components']) > 0, 'SBOM has zero components'
+          print(f'SBOM valid: {len(bom[\"components\"])} components')
+          "
+      - name: Verify static linking (musl only)
+        if: contains(matrix.target, 'musl')
+        run: |
+          set -euo pipefail
+          if ldd target/${{ matrix.target }}/release/karapace 2>&1 | grep -q 'not a dynamic executable'; then
+            echo "PASS: karapace is statically linked"
+          else
+            echo "FAIL: karapace is NOT statically linked"
+            ldd target/${{ matrix.target }}/release/karapace
+            exit 1
+          fi
+          if ldd target/${{ matrix.target }}/release/karapace-dbus 2>&1 | grep -q 'not a dynamic executable'; then
+            echo "PASS: karapace-dbus is statically linked"
+          else
+            echo "FAIL: karapace-dbus is NOT statically linked"
+            ldd target/${{ matrix.target }}/release/karapace-dbus
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/${{ matrix.target }}/release/karapace
+            target/${{ matrix.target }}/release/karapace-dbus
+            target/${{ matrix.target }}/release/SHA256SUMS
+
+  smoke-test:
+    name: Smoke Test Release (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: [build-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: karapace-linux-x86_64-gnu
+            binary_path: target/x86_64-unknown-linux-gnu/release
+          - target: x86_64-unknown-linux-musl
+            artifact: karapace-linux-x86_64-musl
+            binary_path: target/x86_64-unknown-linux-musl/release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+      - name: Verify binary
+        run: |
+          chmod +x ${{ matrix.binary_path }}/karapace
+          ${{ matrix.binary_path }}/karapace --version
+          ${{ matrix.binary_path }}/karapace doctor
+          ${{ matrix.binary_path }}/karapace migrate
+
+  reproducibility-check:
+    name: Reproducibility Check (same-run)
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Build A
+        run: cargo build --release -p karapace-cli -p karapace-dbus
+      - name: Record hashes A
+        run: |
+          sha256sum target/release/karapace target/release/karapace-dbus > /tmp/hashes-a.txt
+          cat /tmp/hashes-a.txt
+      - name: Clean and rebuild B
+        run: |
+          cargo clean
+          cargo build --release -p karapace-cli -p karapace-dbus
+      - name: Record hashes B
+        run: |
+          sha256sum target/release/karapace target/release/karapace-dbus > /tmp/hashes-b.txt
+          cat /tmp/hashes-b.txt
+      - name: Compare A vs B
+        run: |
+          set -euo pipefail
+          echo "=== Build A ==="
+          cat /tmp/hashes-a.txt
+          echo "=== Build B ==="
+          cat /tmp/hashes-b.txt
+          HASH_A_CLI=$(awk '/karapace$/{print $1}' /tmp/hashes-a.txt)
+          HASH_B_CLI=$(awk '/karapace$/{print $1}' /tmp/hashes-b.txt)
+          HASH_A_DBUS=$(awk '/karapace-dbus$/{print $1}' /tmp/hashes-a.txt)
+          HASH_B_DBUS=$(awk '/karapace-dbus$/{print $1}' /tmp/hashes-b.txt)
+          if [ "$HASH_A_CLI" != "$HASH_B_CLI" ]; then
+            echo "FATAL: karapace binary not reproducible"
+            echo "  A: $HASH_A_CLI"
+            echo "  B: $HASH_B_CLI"
+            exit 1
+          fi
+          if [ "$HASH_A_DBUS" != "$HASH_B_DBUS" ]; then
+            echo "FATAL: karapace-dbus binary not reproducible"
+            echo "  A: $HASH_A_DBUS"
+            echo "  B: $HASH_B_DBUS"
+            exit 1
+          fi
+          echo "Reproducibility check PASSED: both binaries byte-identical across builds"
+
+  cross-run-reproducibility:
+    name: Cross-Run Reproducibility (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-latest
+            runner: ubuntu-latest
+          - label: ubuntu-22.04
+            runner: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Build release
+        run: cargo build --release -p karapace-cli -p karapace-dbus
+      - name: Compute hashes
+        run: |
+          sha256sum target/release/karapace target/release/karapace-dbus > hashes.txt
+          cat hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repro-hashes-${{ matrix.label }}
+          path: hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repro-binary-${{ matrix.label }}
+          path: |
+            target/release/karapace
+            target/release/karapace-dbus
+
+  verify-cross-reproducibility:
+    name: Verify Cross-Run Reproducibility
+    runs-on: ubuntu-latest
+    needs: [cross-run-reproducibility]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-hashes-ubuntu-latest
+          path: build-latest
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-hashes-ubuntu-22.04
+          path: build-2204
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-binary-ubuntu-latest
+          path: bin-latest
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-binary-ubuntu-22.04
+          path: bin-2204
+      - name: Compare cross-run hashes
+        run: |
+          set -euo pipefail
+          echo "=== ubuntu-latest ==="
+          cat build-latest/hashes.txt
+          echo "=== ubuntu-22.04 ==="
+          cat build-2204/hashes.txt
+          if diff -u build-latest/hashes.txt build-2204/hashes.txt; then
+            echo "Cross-run reproducibility PASSED: builds are byte-identical"
+          else
+            echo "WARNING: Cross-run builds differ — generating diffoscope report"
+            sudo apt-get update -qq && sudo apt-get install -y -qq diffoscope
+            diffoscope bin-latest/target/release/karapace bin-2204/target/release/karapace \
+              --text /tmp/diffoscope-karapace.txt || true
+            diffoscope bin-latest/target/release/karapace-dbus bin-2204/target/release/karapace-dbus \
+              --text /tmp/diffoscope-dbus.txt || true
+            echo "=== Diffoscope report (karapace) ==="
+            cat /tmp/diffoscope-karapace.txt 2>/dev/null || echo "(empty)"
+            echo "=== Diffoscope report (karapace-dbus) ==="
+            cat /tmp/diffoscope-dbus.txt 2>/dev/null || echo "(empty)"
+            echo "FATAL: Cross-run builds are NOT reproducible"
+            exit 1
+          fi
+
+  reproducibility-check-musl:
+    name: Reproducibility Check (musl, same-run)
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl-tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Build A (musl)
+        run: |
+          cargo clean
+          cargo build --release -p karapace-cli -p karapace-dbus --target x86_64-unknown-linux-musl
+      - name: Record hashes A
+        run: |
+          sha256sum target/x86_64-unknown-linux-musl/release/karapace target/x86_64-unknown-linux-musl/release/karapace-dbus > /tmp/hashes-a.txt
+          cat /tmp/hashes-a.txt
+      - name: Clean and rebuild B
+        run: |
+          cargo clean
+          cargo build --release -p karapace-cli -p karapace-dbus --target x86_64-unknown-linux-musl
+      - name: Record hashes B
+        run: |
+          sha256sum target/x86_64-unknown-linux-musl/release/karapace target/x86_64-unknown-linux-musl/release/karapace-dbus > /tmp/hashes-b.txt
+          cat /tmp/hashes-b.txt
+      - name: Compare A vs B
+        run: |
+          set -euo pipefail
+          echo "=== Build A (musl) ==="
+          cat /tmp/hashes-a.txt
+          echo "=== Build B (musl) ==="
+          cat /tmp/hashes-b.txt
+          HASH_A_CLI=$(awk '/karapace$/{print $1}' /tmp/hashes-a.txt)
+          HASH_B_CLI=$(awk '/karapace$/{print $1}' /tmp/hashes-b.txt)
+          HASH_A_DBUS=$(awk '/karapace-dbus$/{print $1}' /tmp/hashes-a.txt)
+          HASH_B_DBUS=$(awk '/karapace-dbus$/{print $1}' /tmp/hashes-b.txt)
+          if [ "$HASH_A_CLI" != "$HASH_B_CLI" ]; then
+            echo "FATAL: karapace musl binary not reproducible"
+            echo "  A: $HASH_A_CLI"
+            echo "  B: $HASH_B_CLI"
+            exit 1
+          fi
+          if [ "$HASH_A_DBUS" != "$HASH_B_DBUS" ]; then
+            echo "FATAL: karapace-dbus musl binary not reproducible"
+            echo "  A: $HASH_A_DBUS"
+            echo "  B: $HASH_B_DBUS"
+            exit 1
+          fi
+          echo "Musl reproducibility check PASSED: both binaries byte-identical across builds"
+
+  cross-run-reproducibility-musl:
+    name: Cross-Run Reproducibility musl (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-latest
+            runner: ubuntu-latest
+          - label: ubuntu-22.04
+            runner: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl-tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Build release (musl)
+        run: |
+          cargo clean
+          cargo build --release -p karapace-cli -p karapace-dbus --target x86_64-unknown-linux-musl
+      - name: Compute hashes
+        run: |
+          sha256sum target/x86_64-unknown-linux-musl/release/karapace target/x86_64-unknown-linux-musl/release/karapace-dbus > hashes.txt
+          cat hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repro-musl-hashes-${{ matrix.label }}
+          path: hashes.txt
+
+  verify-cross-reproducibility-musl:
+    name: Verify Cross-Run Reproducibility (musl)
+    runs-on: ubuntu-latest
+    needs: [cross-run-reproducibility-musl]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-musl-hashes-ubuntu-latest
+          path: build-latest
+      - uses: actions/download-artifact@v4
+        with:
+          name: repro-musl-hashes-ubuntu-22.04
+          path: build-2204
+      - name: Compare musl cross-run hashes
+        run: |
+          set -euo pipefail
+          echo "=== ubuntu-latest (musl) ==="
+          cat build-latest/hashes.txt
+          echo "=== ubuntu-22.04 (musl) ==="
+          cat build-2204/hashes.txt
+          if diff -u build-latest/hashes.txt build-2204/hashes.txt; then
+            echo "Musl cross-run reproducibility PASSED: builds are byte-identical"
+          else
+            echo "WARNING: Musl cross-run builds differ"
+            echo "NOTE: Musl static builds should be runner-independent"
+            echo "FATAL: Musl cross-run builds are NOT reproducible"
+            exit 1
+          fi
+
+  lockfile-check:
+    name: Lockfile Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Verify Cargo.lock is up-to-date
+        run: |
+          cp Cargo.lock /tmp/Cargo.lock.before
+          cargo update
+          if ! diff -u /tmp/Cargo.lock.before Cargo.lock; then
+            echo "FATAL: Cargo.lock is not up-to-date or has drifted"
+            echo "Run 'cargo update' locally and commit the result"
+            exit 1
+          fi
+          echo "Cargo.lock integrity: OK (no drift detected)"
+
+  cargo-deny:
+    name: Dependency Policy (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  ci-contract:
+    name: CI Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all required jobs exist
+        run: |
+          set -euo pipefail
+          REQUIRED_JOBS="fmt clippy test e2e enospc e2e-resolve build-release smoke-test ci-contract reproducibility-check reproducibility-check-musl cross-run-reproducibility verify-cross-reproducibility cross-run-reproducibility-musl verify-cross-reproducibility-musl lockfile-check cargo-deny"
+          MISSING=""
+          for job in $REQUIRED_JOBS; do
+            if ! grep -qE "^  ${job}:" .github/workflows/ci.yml; then
+              MISSING="$MISSING $job"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "FATAL: Missing required CI jobs:$MISSING"
+            echo "See CI_CONTRACT.md for the full list of required jobs."
+            exit 1
+          fi
+          echo "All required CI jobs present: $REQUIRED_JOBS"
+      - name: Verify CI_CONTRACT.md exists
+        run: |
+          if [ ! -f CI_CONTRACT.md ]; then
+            echo "FATAL: CI_CONTRACT.md missing"
+            exit 1
+          fi
+          echo "CI_CONTRACT.md present"

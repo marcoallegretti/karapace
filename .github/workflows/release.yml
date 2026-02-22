@@ -1,0 +1,270 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: >-
+    -D warnings
+    --remap-path-prefix /home/runner/work=src
+    --remap-path-prefix /home/runner/.cargo/registry/src=crate
+    --remap-path-prefix /home/runner/.rustup=rustup
+  RUST_TOOLCHAIN: "1.82"
+  SOURCE_DATE_EPOCH: "0"
+  CARGO_INCREMENTAL: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Release (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Clean before release build
+        run: cargo clean
+      - name: Build release binaries
+        run: cargo build --release --workspace --target ${{ matrix.target }}
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx@0.5.5 --locked
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --all
+      - name: Compute and verify checksums
+        run: |
+          cd target/${{ matrix.target }}/release
+          sha256sum karapace karapace-dbus > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Validate SBOM
+        run: |
+          SBOM=$(find crates/karapace-cli -name '*.cdx.json' | head -1)
+          python3 -c "
+          import json
+          with open('$SBOM') as f:
+              bom = json.load(f)
+          assert 'components' in bom and len(bom['components']) > 0
+          print(f'SBOM valid: {len(bom[\"components\"])} components')
+          "
+      - name: Verify static linking (musl only)
+        if: contains(matrix.target, 'musl')
+        run: |
+          set -euo pipefail
+          for bin in karapace karapace-dbus; do
+            if ldd target/${{ matrix.target }}/release/$bin 2>&1 | grep -q 'not a dynamic executable'; then
+              echo "PASS: $bin is statically linked"
+            else
+              echo "FAIL: $bin is NOT statically linked"
+              ldd target/${{ matrix.target }}/release/$bin
+              exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/karapace
+            target/${{ matrix.target }}/release/karapace-dbus
+            target/${{ matrix.target }}/release/SHA256SUMS
+
+  sign:
+    name: Sign Release (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      id-token: write
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            suffix: gnu
+          - target: x86_64-unknown-linux-musl
+            suffix: musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign binaries
+        run: |
+          cosign sign-blob --yes \
+            artifacts/target/${{ matrix.target }}/release/karapace \
+            --output-signature artifacts/karapace-${{ matrix.suffix }}.sig \
+            --output-certificate artifacts/karapace-${{ matrix.suffix }}.crt
+          cosign sign-blob --yes \
+            artifacts/target/${{ matrix.target }}/release/karapace-dbus \
+            --output-signature artifacts/karapace-dbus-${{ matrix.suffix }}.sig \
+            --output-certificate artifacts/karapace-dbus-${{ matrix.suffix }}.crt
+      - name: Generate and sign provenance attestation
+        run: |
+          cat > artifacts/provenance-${{ matrix.suffix }}.json << EOF
+          {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": "https://slsa.dev/provenance/v0.2",
+            "subject": [
+              {
+                "name": "karapace-${{ matrix.suffix }}",
+                "digest": {
+                  "sha256": "$(sha256sum artifacts/target/${{ matrix.target }}/release/karapace | awk '{print $1}')"
+                }
+              },
+              {
+                "name": "karapace-dbus-${{ matrix.suffix }}",
+                "digest": {
+                  "sha256": "$(sha256sum artifacts/target/${{ matrix.target }}/release/karapace-dbus | awk '{print $1}')"
+                }
+              }
+            ],
+            "predicate": {
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              },
+              "buildType": "https://github.com/actions/runner",
+              "invocation": {
+                "configSource": {
+                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  },
+                  "entryPoint": ".github/workflows/release.yml"
+                }
+              },
+              "metadata": {
+                "buildInvocationId": "${{ github.run_id }}",
+                "completeness": {
+                  "parameters": true,
+                  "environment": true,
+                  "materials": true
+                },
+                "reproducible": true
+              },
+              "materials": [
+                {
+                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+          }
+          EOF
+          cosign sign-blob --yes \
+            artifacts/provenance-${{ matrix.suffix }}.json \
+            --output-signature artifacts/provenance-${{ matrix.suffix }}.json.sig \
+            --output-certificate artifacts/provenance-${{ matrix.suffix }}.json.crt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signatures-${{ matrix.suffix }}
+          path: |
+            artifacts/*.sig
+            artifacts/*.crt
+            artifacts/provenance-${{ matrix.suffix }}.json
+
+  verify:
+    name: Verify Release (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: [sign]
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            suffix: gnu
+          - target: x86_64-unknown-linux-musl
+            suffix: musl
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: signatures-${{ matrix.suffix }}
+          path: sigs
+      - uses: sigstore/cosign-installer@v3
+      - name: Verify checksums
+        run: |
+          cd release/target/${{ matrix.target }}/release
+          sha256sum -c SHA256SUMS
+      - name: Verify binary signatures
+        run: |
+          cosign verify-blob release/target/${{ matrix.target }}/release/karapace \
+            --signature sigs/artifacts/karapace-${{ matrix.suffix }}.sig \
+            --certificate sigs/artifacts/karapace-${{ matrix.suffix }}.crt \
+            --certificate-identity-regexp 'https://github.com/marcoallegretti/karapace' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          cosign verify-blob release/target/${{ matrix.target }}/release/karapace-dbus \
+            --signature sigs/artifacts/karapace-dbus-${{ matrix.suffix }}.sig \
+            --certificate sigs/artifacts/karapace-dbus-${{ matrix.suffix }}.crt \
+            --certificate-identity-regexp 'https://github.com/marcoallegretti/karapace' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Verify provenance attestation
+        run: |
+          cosign verify-blob sigs/artifacts/provenance-${{ matrix.suffix }}.json \
+            --signature sigs/artifacts/provenance-${{ matrix.suffix }}.json.sig \
+            --certificate sigs/artifacts/provenance-${{ matrix.suffix }}.json.crt \
+            --certificate-identity-regexp 'https://github.com/marcoallegretti/karapace' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-x86_64-unknown-linux-gnu
+          path: release-gnu
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-x86_64-unknown-linux-musl
+          path: release-musl
+      - uses: actions/download-artifact@v4
+        with:
+          name: signatures-gnu
+          path: sigs-gnu
+      - uses: actions/download-artifact@v4
+        with:
+          name: signatures-musl
+          path: sigs-musl
+      - name: Stage release files
+        run: |
+          mkdir -p dist
+          # GNU binaries (renamed with -gnu suffix)
+          cp release-gnu/target/x86_64-unknown-linux-gnu/release/karapace dist/karapace-linux-x86_64-gnu
+          cp release-gnu/target/x86_64-unknown-linux-gnu/release/karapace-dbus dist/karapace-dbus-linux-x86_64-gnu
+          cp release-gnu/target/x86_64-unknown-linux-gnu/release/SHA256SUMS dist/SHA256SUMS-gnu
+          # Musl binaries (renamed with -musl suffix)
+          cp release-musl/target/x86_64-unknown-linux-musl/release/karapace dist/karapace-linux-x86_64-musl
+          cp release-musl/target/x86_64-unknown-linux-musl/release/karapace-dbus dist/karapace-dbus-linux-x86_64-musl
+          cp release-musl/target/x86_64-unknown-linux-musl/release/SHA256SUMS dist/SHA256SUMS-musl
+          # Signatures
+          cp sigs-gnu/artifacts/*.sig sigs-gnu/artifacts/*.crt dist/
+          cp sigs-gnu/artifacts/provenance-gnu.json dist/
+          cp sigs-musl/artifacts/*.sig sigs-musl/artifacts/*.crt dist/
+          cp sigs-musl/artifacts/provenance-musl.json dist/
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

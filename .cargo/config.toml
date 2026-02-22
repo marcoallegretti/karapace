@@ -1,0 +1,21 @@
+# Supply-chain hardening: deterministic builds
+#
+# Path remapping eliminates local filesystem paths from binaries.
+# CI sets RUSTFLAGS env var which OVERRIDES build.rustflags below.
+# SOURCE_DATE_EPOCH=0 ensures no build timestamps leak.
+#
+# NOTE: Local dev builds use build.rustflags for path remapping.
+# CI builds use the RUSTFLAGS env var instead (takes precedence).
+# This means local builds get local remapping, CI gets CI remapping.
+
+[env]
+SOURCE_DATE_EPOCH = "0"
+
+[build]
+# Remap common local paths in release builds.
+# These are best-effort for local dev — CI RUSTFLAGS override this entirely.
+# The $HOME/.cargo/registry/src prefix covers most dependency crate paths.
+rustflags = [
+  "--remap-path-prefix", "/home/lateuf/.cargo/registry/src=crate",
+  "--remap-path-prefix", "/home/lateuf/Projects/Karapace=src",
+]
