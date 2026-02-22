@@ -1,0 +1,37 @@
+[package]
+name = "karapace-core"
+description = "Build engine, lifecycle state machine, drift control, and concurrency for Karapace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+ctrlc.workspace = true
+tracing.workspace = true
+fs2.workspace = true
+libc.workspace = true
+karapace-schema = { path = "../karapace-schema" }
+karapace-store = { path = "../karapace-store" }
+karapace-runtime = { path = "../karapace-runtime" }
+karapace-remote = { path = "../karapace-remote" }
+tempfile.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bin]]
+name = "stress_test"
+path = "src/bin/stress_test.rs"
+
+[[bench]]
+name = "engine_benchmarks"
+harness = false
