@@ -8,6 +8,15 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+/// Skip test if running as root — root bypasses filesystem permission checks,
+/// so read-only directory tests are meaningless in containers running as uid 0.
+fn skip_if_root() -> bool {
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::getuid() == 0
+    }
+}
+
 fn write_manifest(dir: &Path, content: &str) -> std::path::PathBuf {
     let path = dir.join("karapace.toml");
     fs::write(&path, content).unwrap();
@@ -1370,6 +1379,7 @@ fn gc_is_idempotent_after_partial_run() {
 // M6.2: Object read fails gracefully on permission denied
 #[test]
 fn object_get_fails_on_permission_denied() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let layout = StoreLayout::new(store.path());
     layout.initialize().unwrap();
@@ -1391,6 +1401,7 @@ fn object_get_fails_on_permission_denied() {
 // M6.2: Metadata write fails gracefully on read-only store
 #[test]
 fn metadata_put_fails_on_read_only_dir() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let layout = StoreLayout::new(store.path());
     layout.initialize().unwrap();
@@ -1594,6 +1605,7 @@ fn stale_running_marker_cleaned_on_engine_new() {
 
 #[test]
 fn build_on_readonly_objects_dir_returns_error() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
 
@@ -1618,6 +1630,7 @@ fn build_on_readonly_objects_dir_returns_error() {
 
 #[test]
 fn build_on_readonly_metadata_dir_returns_error() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
 
@@ -1640,6 +1653,7 @@ fn build_on_readonly_metadata_dir_returns_error() {
 
 #[test]
 fn commit_on_readonly_layers_dir_returns_error() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let engine = Engine::new(store.path());
@@ -1678,6 +1692,7 @@ fn commit_on_readonly_layers_dir_returns_error() {
 
 #[test]
 fn write_failure_never_panics() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let layout = StoreLayout::new(store.path());
     layout.initialize().unwrap();
@@ -2099,6 +2114,7 @@ backend = "mock"
 
 #[test]
 fn wal_write_fails_on_readonly_dir() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let layout = StoreLayout::new(store.path());
     layout.initialize().unwrap();
@@ -2122,6 +2138,7 @@ fn wal_write_fails_on_readonly_dir() {
 
 #[test]
 fn build_fails_cleanly_when_wal_dir_is_readonly() {
+    if skip_if_root() { return; }
     let store = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
 
