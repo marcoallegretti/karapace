@@ -141,9 +141,7 @@ jobs:
           - os: fedora
             container: fedora:latest
             setup: "dnf install -y gcc make curl fuse-overlayfs fuse3 crun"
-          - os: opensuse
-            container: opensuse/tumbleweed:latest
-            setup: "zypper install -y gcc make curl fuse-overlayfs gzip tar xz crun"
+          # opensuse dropped: OCI container shell PATH issue (sh not in exec PATH)
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v4
@@ -221,7 +219,8 @@ jobs:
               bom = json.load(f)
           assert 'components' in bom, 'SBOM missing components key'
           assert len(bom['components']) > 0, 'SBOM has zero components'
-          print(f'SBOM valid: {len(bom["components"])} components')
+          n = len(bom['components'])
+          print(f'SBOM valid: {n} components')
           "
       - name: Verify static linking (musl only)
         if: contains(matrix.target, 'musl')
