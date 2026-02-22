@@ -1,0 +1,30 @@
+[package]
+name = "karapace-dbus"
+description = "Socket-activated D-Bus desktop integration service for Karapace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "karapace-dbus"
+path = "src/main.rs"
+
+[dependencies]
+zbus.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+notify-rust.workspace = true
+karapace-core = { path = "../karapace-core" }
+karapace-schema = { path = "../karapace-schema" }
+karapace-store = { path = "../karapace-store" }
+
+[dev-dependencies]
+tempfile.workspace = true
