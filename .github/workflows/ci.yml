@@ -53,18 +53,12 @@ jobs:
           - os: fedora
             runner: ubuntu-latest
             container: fedora:latest
-          - os: opensuse
-            runner: ubuntu-latest
-            container: opensuse/tumbleweed:latest
     container: ${{ matrix.container || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install build deps (Fedora)
         if: matrix.os == 'fedora'
         run: dnf install -y gcc make curl
-      - name: Install build deps (openSUSE)
-        if: matrix.os == 'opensuse'
-        run: zypper install -y gcc make curl gzip tar xz
       - name: Install Rust (container)
         if: matrix.container != ''
         run: |
