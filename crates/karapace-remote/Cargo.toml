@@ -1,0 +1,23 @@
+[package]
+name = "karapace-remote"
+description = "Remote content-addressable store for Karapace environment sharing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+chrono.workspace = true
+blake3.workspace = true
+karapace-store = { path = "../karapace-store" }
+
+[dev-dependencies]
+tempfile.workspace = true
