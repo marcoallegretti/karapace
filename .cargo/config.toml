@@ -11,11 +11,12 @@
 [env]
 SOURCE_DATE_EPOCH = "0"
 
-[build]
-# Remap common local paths in release builds.
-# These are best-effort for local dev — CI RUSTFLAGS override this entirely.
-# The $HOME/.cargo/registry/src prefix covers most dependency crate paths.
-rustflags = [
-  "--remap-path-prefix", "/home/lateuf/.cargo/registry/src=crate",
-  "--remap-path-prefix", "/home/lateuf/Projects/Karapace=src",
-]
+# [build]
+# Path remapping for local dev builds is optional.
+# CI RUSTFLAGS override build.rustflags entirely.
+# strip = true in profile.release removes debug paths from binaries.
+# Uncomment and adjust for your system if you want local path remapping:
+# rustflags = [
+#   "--remap-path-prefix", "/home/YOU/.cargo/registry/src=crate",
+#   "--remap-path-prefix", "/home/YOU/Projects/Karapace=src",
+# ]

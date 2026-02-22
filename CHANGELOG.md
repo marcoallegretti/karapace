@@ -57,7 +57,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Lock file v2** — resolved packages with pinned versions, base image content digest (not tag), dual verification (integrity + manifest intent).
 - **Content-addressable store** — blake3 hashing, atomic writes (NamedTempFile + persist), integrity verification on read, reference counting, garbage collection with signal cancellation.
 - **CLI commands** — `build`, `rebuild`, `enter`, `exec`, `destroy`, `stop`, `freeze`, `archive`, `list`, `inspect`, `diff`, `snapshots`, `commit`, `restore`, `gc`, `verify-store`, `push`, `pull`, `rename`, `completions`, `man-pages`, `doctor`, `migrate`.
-- **`quick` command** — one-step environment creation for casual users (`karapace quick rolling -p git,curl --enter`). Generates a real manifest + lock file, preserving determinism while matching Distrobox-like simplicity.
 - **Example manifests** — `examples/minimal.toml`, `examples/dev.toml`, `examples/gui-dev.toml`, `examples/ubuntu-dev.toml`, `examples/rust-dev.toml` for common use cases.
 - **Multi-distro image support** — openSUSE Tumbleweed/Leap, Ubuntu (20.04–24.10), Debian (Bookworm/Trixie/Sid), Fedora (40–42), Arch Linux, custom URLs.
 - **Runtime backends** — user namespace (`unshare` + `fuse-overlayfs` + `chroot`), OCI (`crun`/`runc`/`youki`), mock (for testing).
