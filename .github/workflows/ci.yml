@@ -254,20 +254,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             artifact: karapace-linux-x86_64-gnu
-            binary_path: target/x86_64-unknown-linux-gnu/release
           - target: x86_64-unknown-linux-musl
             artifact: karapace-linux-x86_64-musl
-            binary_path: target/x86_64-unknown-linux-musl/release
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: ${{ matrix.artifact }}
+          path: bin
       - name: Verify binary
         run: |
-          chmod +x ${{ matrix.binary_path }}/karapace
-          ${{ matrix.binary_path }}/karapace --version
-          ${{ matrix.binary_path }}/karapace doctor
-          ${{ matrix.binary_path }}/karapace migrate
+          chmod +x bin/karapace
+          bin/karapace --version
+          bin/karapace doctor
+          bin/karapace migrate
 
   reproducibility-check:
     name: Reproducibility Check (same-run)
