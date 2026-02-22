@@ -64,7 +64,7 @@ jobs:
         run: dnf install -y gcc make curl
       - name: Install build deps (openSUSE)
         if: matrix.os == 'opensuse'
-        run: zypper install -y gcc make curl gzip tar xz
+        run: zypper install -y gcc make curl gzip tar xz bash
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -136,7 +136,7 @@ jobs:
             setup: "dnf install -y gcc make curl fuse-overlayfs fuse3 crun"
           - os: opensuse
             container: opensuse/tumbleweed:latest
-            setup: "zypper install -y gcc make curl fuse-overlayfs gzip tar xz crun"
+            setup: "zypper install -y gcc make curl fuse-overlayfs gzip tar xz bash crun"
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v4

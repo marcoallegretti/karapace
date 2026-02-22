@@ -6,7 +6,10 @@
 use std::process::Command;
 
 fn karapace_bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_karapace"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_karapace"));
+    // Skip runtime prerequisite checks — mock backend does not need user namespaces
+    cmd.env("KARAPACE_SKIP_PREREQS", "1");
+    cmd
 }
 
 fn temp_store() -> tempfile::TempDir {

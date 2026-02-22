@@ -203,7 +203,7 @@ fn main() -> ExitCode {
             | Commands::Exec { .. }
             | Commands::Rebuild { .. }
     );
-    if needs_runtime {
+    if needs_runtime && std::env::var("KARAPACE_SKIP_PREREQS").as_deref() != Ok("1") {
         let missing = karapace_runtime::check_namespace_prereqs();
         if !missing.is_empty() {
             eprintln!("error: {}", karapace_runtime::format_missing(&missing));
