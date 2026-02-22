@@ -1,0 +1,23 @@
+[package]
+name = "karapace-tui"
+description = "Terminal UI for Karapace environment manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "karapace_tui"
+path = "src/lib.rs"
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+karapace-core = { path = "../karapace-core" }
+karapace-store = { path = "../karapace-store" }
+
+[dev-dependencies]
+tempfile.workspace = true
