@@ -11,7 +11,7 @@ env:
     --remap-path-prefix /home/runner/work=src
     --remap-path-prefix /home/runner/.cargo/registry/src=crate
     --remap-path-prefix /home/runner/.rustup=rustup
-  RUST_TOOLCHAIN: "1.82"
+  RUST_TOOLCHAIN: "1.88"
   SOURCE_DATE_EPOCH: "0"
   CARGO_INCREMENTAL: "0"
 
