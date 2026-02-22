@@ -1198,6 +1198,7 @@ dependencies = [
  "chrono",
  "fs2",
  "karapace-schema",
+ "libc",
  "serde",
  "serde_json",
  "tar",

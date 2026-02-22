@@ -67,9 +67,9 @@ jobs:
         run: zypper install -y gcc make curl gzip tar xz
       - name: Install Rust (container)
         if: matrix.container != ''
-        shell: sh
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          . "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.container == ''
@@ -150,9 +150,9 @@ jobs:
       - name: Install prerequisites
         run: ${{ matrix.setup }}
       - name: Install Rust
-        shell: sh
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          . "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: Swatinem/rust-cache@v2
       - name: Enable user namespaces

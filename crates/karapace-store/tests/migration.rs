@@ -218,6 +218,12 @@ fn migrate_rejects_future_version() {
 fn migrate_atomic_version_unchanged_on_write_failure() {
     use std::os::unix::fs::PermissionsExt;
 
+    // Root bypasses filesystem permission checks — skip in containers
+    #[allow(unsafe_code)]
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
+
     let dir = tempfile::tempdir().unwrap();
     create_v1_store(dir.path(), 1);
 
