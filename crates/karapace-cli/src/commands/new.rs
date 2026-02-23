@@ -1,7 +1,8 @@
 use super::{json_pretty, EXIT_SUCCESS};
 use dialoguer::{Confirm, Input, Select};
 use karapace_schema::manifest::{
-    parse_manifest_str, BaseSection, ManifestV1, MountsSection, RuntimeSection, SystemSection,
+    parse_manifest_str, BaseSection, GuiSection, HardwareSection, ManifestV1, MountsSection,
+    RuntimeSection, SystemSection,
 };
 use std::io::{stdin, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -30,8 +31,7 @@ fn load_template(name: &str) -> Result<ManifestV1, String> {
 fn write_atomic(dest: &Path, content: &str) -> Result<(), String> {
     let dir = dest
         .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let mut tmp = NamedTempFile::new_in(&dir).map_err(|e| format!("write temp file: {e}"))?;
     use std::io::Write;
     tmp.write_all(content.as_bytes())
@@ -44,54 +44,73 @@ fn write_atomic(dest: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_can_write(dest: &Path, force: bool, is_tty: bool) -> Result<(), String> {
+    if !dest.exists() || force {
+        return Ok(());
+    }
+    if !is_tty {
+        return Err(format!(
+            "refusing to overwrite existing ./{DEST_MANIFEST} (pass --force)"
+        ));
+    }
+    let overwrite = Confirm::new()
+        .with_prompt(format!("overwrite ./{DEST_MANIFEST}?"))
+        .default(false)
+        .interact()
+        .map_err(|e| format!("prompt failed: {e}"))?;
+    if overwrite {
+        Ok(())
+    } else {
+        Err(format!(
+            "refusing to overwrite existing ./{DEST_MANIFEST} (pass --force)"
+        ))
+    }
+}
+
+fn print_result(name: &str, template: Option<&str>, json: bool) -> Result<(), String> {
+    if json {
+        let payload = serde_json::json!({
+            "status": "written",
+            "path": format!("./{DEST_MANIFEST}"),
+            "name": name,
+            "template": template,
+        });
+        println!("{}", json_pretty(&payload)?);
+    } else {
+        println!("wrote ./{DEST_MANIFEST} for '{name}'");
+        if let Some(tpl) = template {
+            println!("template: {tpl}");
+        }
+    }
+    Ok(())
+}
+
 pub fn run(name: &str, template: Option<&str>, force: bool, json: bool) -> Result<u8, String> {
     let dest = Path::new(DEST_MANIFEST);
     let is_tty = stdin().is_terminal();
+    ensure_can_write(dest, force, is_tty)?;
 
-    if dest.exists() && !force {
-        if is_tty {
-            let overwrite = Confirm::new()
-                .with_prompt(format!("overwrite ./{DEST_MANIFEST}?"))
-                .default(false)
-                .interact()
-                .map_err(|e| format!("prompt failed: {e}"))?;
-            if !overwrite {
-                return Err(format!(
-                    "refusing to overwrite existing ./{DEST_MANIFEST} (pass --force)"
-                ));
-            }
-        } else {
-            return Err(format!(
-                "refusing to overwrite existing ./{DEST_MANIFEST} (pass --force)"
-            ));
+    let mut manifest = if let Some(tpl) = template {
+        load_template(tpl)?
+    } else {
+        if !is_tty {
+            return Err("no --template provided and stdin is not a TTY".to_owned());
         }
-    }
-
-    let mut manifest = match template {
-        Some(tpl) => load_template(tpl)?,
-        None => {
-            if !is_tty {
-                return Err("no --template provided and stdin is not a TTY".to_owned());
-            }
-
-            let image: String = Input::new()
-                .with_prompt("base image")
-                .default("rolling".to_owned())
-                .interact_text()
-                .map_err(|e| format!("prompt failed: {e}"))?;
-
-            ManifestV1 {
-                manifest_version: 1,
-                base: BaseSection { image },
-                system: SystemSection::default(),
-                gui: Default::default(),
-                hardware: Default::default(),
-                mounts: MountsSection::default(),
-                runtime: RuntimeSection::default(),
-            }
+        let image: String = Input::new()
+            .with_prompt("base image")
+            .default("rolling".to_owned())
+            .interact_text()
+            .map_err(|e| format!("prompt failed: {e}"))?;
+        ManifestV1 {
+            manifest_version: 1,
+            base: BaseSection { image },
+            system: SystemSection::default(),
+            gui: GuiSection::default(),
+            hardware: HardwareSection::default(),
+            mounts: MountsSection::default(),
+            runtime: RuntimeSection::default(),
         }
     };
-
     if is_tty {
         let packages: String = Input::new()
             .with_prompt("packages (space-separated, empty to skip)")
@@ -116,7 +135,6 @@ pub fn run(name: &str, template: Option<&str>, force: bool, json: bool) -> Resul
                 .entries
                 .insert("workspace".to_owned(), mount);
         }
-
         let backends = ["namespace", "oci", "mock"];
         let default_idx = backends
             .iter()
@@ -128,8 +146,8 @@ pub fn run(name: &str, template: Option<&str>, force: bool, json: bool) -> Resul
             .default(default_idx)
             .interact()
             .map_err(|e| format!("prompt failed: {e}"))?;
-        manifest.runtime.backend = backends[idx].to_owned();
-
+        manifest.runtime.backend.clear();
+        manifest.runtime.backend.push_str(backends[idx]);
         let isolated = Confirm::new()
             .with_prompt("enable network isolation?")
             .default(manifest.runtime.network_isolation)
@@ -139,26 +157,10 @@ pub fn run(name: &str, template: Option<&str>, force: bool, json: bool) -> Resul
     } else if template.is_none() {
         return Err("interactive prompts require a TTY".to_owned());
     }
-
     let toml =
         toml::to_string_pretty(&manifest).map_err(|e| format!("TOML serialization failed: {e}"))?;
     write_atomic(dest, &toml)?;
-
-    if json {
-        let payload = serde_json::json!({
-            "status": "written",
-            "path": format!("./{DEST_MANIFEST}"),
-            "name": name,
-            "template": template,
-        });
-        println!("{}", json_pretty(&payload)?);
-    } else {
-        println!("wrote ./{DEST_MANIFEST} for '{name}'");
-        if let Some(tpl) = template {
-            println!("template: {tpl}");
-        }
-    }
-
+    print_result(name, template, json)?;
     Ok(EXIT_SUCCESS)
 }
 
