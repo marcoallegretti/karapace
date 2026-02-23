@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::{error::Error as StdError, fmt};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -108,12 +109,40 @@ fn default_backend() -> String {
     "namespace".to_owned()
 }
 
+#[derive(Debug)]
+struct ManifestIoWithPath {
+    path: PathBuf,
+    source: std::io::Error,
+}
+
+impl fmt::Display for ManifestIoWithPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.source)
+    }
+}
+
+impl StdError for ManifestIoWithPath {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.source)
+    }
+}
+
 pub fn parse_manifest_str(input: &str) -> Result<ManifestV1, ManifestError> {
     Ok(toml::from_str(input)?)
 }
 
 pub fn parse_manifest_file(path: impl AsRef<Path>) -> Result<ManifestV1, ManifestError> {
-    let content = fs::read_to_string(path)?;
+    let path = path.as_ref().to_path_buf();
+    let content = fs::read_to_string(&path).map_err(|e| {
+        let kind = e.kind();
+        ManifestError::Io(std::io::Error::new(
+            kind,
+            ManifestIoWithPath {
+                path: path.clone(),
+                source: e,
+            },
+        ))
+    })?;
     parse_manifest_str(&content)
 }
 
