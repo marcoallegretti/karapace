@@ -1,8 +1,12 @@
-use super::{colorize_state, json_pretty, resolve_env_id, EXIT_SUCCESS};
+use super::{colorize_state, json_pretty, resolve_env_id, resolve_env_id_pretty, EXIT_SUCCESS};
 use karapace_core::Engine;
 
 pub fn run(engine: &Engine, env_id: &str, json: bool) -> Result<u8, String> {
-    let resolved = resolve_env_id(engine, env_id)?;
+    let resolved = if json {
+        resolve_env_id(engine, env_id)?
+    } else {
+        resolve_env_id_pretty(engine, env_id)?
+    };
     let meta = engine.inspect(&resolved).map_err(|e| e.to_string())?;
     if json {
         println!("{}", json_pretty(&meta)?);

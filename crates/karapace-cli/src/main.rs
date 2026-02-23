@@ -36,6 +36,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    New {
+        name: String,
+        #[arg(long)]
+        template: Option<String>,
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
     /// Build an environment from a manifest.
     Build {
         /// Path to manifest TOML file.
@@ -164,6 +171,8 @@ enum Commands {
         #[arg(default_value = "man")]
         dir: PathBuf,
     },
+    /// Launch the terminal UI.
+    Tui,
     /// Run diagnostic checks on the system and store.
     Doctor,
     /// Check store version and show migration guidance.
@@ -202,6 +211,7 @@ fn main() -> ExitCode {
             | Commands::Enter { .. }
             | Commands::Exec { .. }
             | Commands::Rebuild { .. }
+            | Commands::Tui
     );
     if needs_runtime && std::env::var("KARAPACE_SKIP_PREREQS").as_deref() != Ok("1") {
         let missing = karapace_runtime::check_namespace_prereqs();
@@ -212,6 +222,11 @@ fn main() -> ExitCode {
     }
 
     let result = match cli.command {
+        Commands::New {
+            name,
+            template,
+            force,
+        } => commands::new::run(&name, template.as_deref(), force, json_output),
         Commands::Build { manifest, name } => commands::build::run(
             &engine,
             &store_path,
@@ -269,6 +284,7 @@ fn main() -> ExitCode {
         }
         Commands::Completions { shell } => commands::completions::run::<Cli>(shell),
         Commands::ManPages { dir } => commands::man_pages::run::<Cli>(&dir),
+        Commands::Tui => commands::tui::run(&store_path, json_output),
         Commands::Doctor => commands::doctor::run(&store_path, json_output),
         Commands::Migrate => commands::migrate::run(&store_path, json_output),
     };

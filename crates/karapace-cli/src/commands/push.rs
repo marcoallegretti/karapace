@@ -1,5 +1,6 @@
 use super::{
-    json_pretty, make_remote_backend, resolve_env_id, spin_fail, spin_ok, spinner, EXIT_SUCCESS,
+    json_pretty, make_remote_backend, resolve_env_id, resolve_env_id_pretty, spin_fail, spin_ok,
+    spinner, EXIT_SUCCESS,
 };
 use karapace_core::Engine;
 
@@ -10,7 +11,11 @@ pub fn run(
     remote_url: Option<&str>,
     json: bool,
 ) -> Result<u8, String> {
-    let resolved = resolve_env_id(engine, env_id)?;
+    let resolved = if json {
+        resolve_env_id(engine, env_id)?
+    } else {
+        resolve_env_id_pretty(engine, env_id)?
+    };
     let backend = make_remote_backend(remote_url)?;
 
     let pb = spinner("pushing environment…");

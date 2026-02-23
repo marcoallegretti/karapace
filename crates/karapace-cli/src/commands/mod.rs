@@ -13,6 +13,7 @@ pub mod inspect;
 pub mod list;
 pub mod man_pages;
 pub mod migrate;
+pub mod new;
 pub mod pull;
 pub mod push;
 pub mod rebuild;
@@ -20,6 +21,7 @@ pub mod rename;
 pub mod restore;
 pub mod snapshots;
 pub mod stop;
+pub mod tui;
 pub mod verify_store;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -93,6 +95,75 @@ pub fn resolve_env_id(engine: &Engine, input: &str) -> Result<String, String> {
         n => Err(format!(
             "ambiguous env_id prefix '{input}': matches {n} environments"
         )),
+    }
+}
+
+fn format_env_suggestion(meta: &karapace_store::EnvMetadata) -> String {
+    let label = meta
+        .name
+        .as_deref()
+        .unwrap_or_else(|| meta.short_id.as_str());
+    format!("{label} ({}) {}", meta.short_id, meta.state)
+}
+
+pub fn resolve_env_id_pretty(engine: &Engine, input: &str) -> Result<String, String> {
+    if input.len() == 64 {
+        return Ok(input.to_owned());
+    }
+
+    let envs = engine.list().map_err(|e| e.to_string())?;
+    for e in &envs {
+        if *e.env_id == *input || *e.short_id == *input || e.name.as_deref() == Some(input) {
+            return Ok(e.env_id.to_string());
+        }
+    }
+
+    let prefix_matches: Vec<_> = envs
+        .iter()
+        .filter(|e| e.env_id.starts_with(input) || e.short_id.starts_with(input))
+        .collect();
+
+    match prefix_matches.len() {
+        0 => {
+            let needle = input.to_lowercase();
+            let mut suggestions: Vec<_> = envs
+                .iter()
+                .filter(|e| {
+                    e.name
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&needle)
+                        || e.short_id.to_lowercase().contains(&needle)
+                })
+                .collect();
+            suggestions.truncate(5);
+
+            if suggestions.is_empty() {
+                Err(format!("no environment matching '{input}'"))
+            } else {
+                let rendered = suggestions
+                    .into_iter()
+                    .map(|m| format!("  {}", format_env_suggestion(m)))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Err(format!(
+                    "no environment matching '{input}'\n\nDid you mean:\n{rendered}\n\nUse 'karapace list' to see all environments."
+                ))
+            }
+        }
+        1 => Ok(prefix_matches[0].env_id.to_string()),
+        n => {
+            let rendered = prefix_matches
+                .iter()
+                .take(10)
+                .map(|m| format!("  {}", format_env_suggestion(m)))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Err(format!(
+                "ambiguous env_id prefix '{input}': matches {n} environments\n\nMatches:\n{rendered}\n\nUse a longer prefix, a full env_id, or a unique name."
+            ))
+        }
     }
 }
 

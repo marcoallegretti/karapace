@@ -1,4 +1,4 @@
-use super::{json_pretty, resolve_env_id, EXIT_SUCCESS};
+use super::{json_pretty, resolve_env_id, resolve_env_id_pretty, EXIT_SUCCESS};
 use karapace_core::Engine;
 use karapace_store::StoreLayout;
 use std::path::Path;
@@ -6,7 +6,11 @@ use std::path::Path;
 pub fn run(engine: &Engine, store_path: &Path, env_id: &str, json: bool) -> Result<u8, String> {
     let _layout = StoreLayout::new(store_path);
 
-    let resolved = resolve_env_id(engine, env_id)?;
+    let resolved = if json {
+        resolve_env_id(engine, env_id)?
+    } else {
+        resolve_env_id_pretty(engine, env_id)?
+    };
     let snapshots = engine
         .list_snapshots(&resolved)
         .map_err(|e| e.to_string())?;
