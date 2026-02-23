@@ -14,6 +14,8 @@ pub enum ManifestError {
     UnsupportedVersion(u32),
     #[error("base.image must not be empty")]
     EmptyBaseImage,
+    #[error("base.image is not pinned: '{0}' (expected http(s)://...)")]
+    UnpinnedBaseImage(String),
     #[error("mount label must not be empty")]
     EmptyMountLabel,
     #[error("invalid mount declaration for '{label}': '{spec}', expected '<host>:<container>'")]
