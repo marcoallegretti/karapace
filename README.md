@@ -64,9 +64,10 @@ See `examples/` for more manifests: `minimal.toml`, `dev.toml`, `gui-dev.toml`, 
 
 ## Commands
 
-23 commands. All accept `--json`, `--store <path>`, `--verbose`, `--trace`.
+25 commands. All accept `--store <path>`, `--verbose`, `--trace`. All except `tui` accept `--json`.
 
 ```
+new <name> [--template] [--force] Generate `karapace.toml`
 build [manifest] [--name]       Build environment
 rebuild [manifest] [--name]     Destroy + rebuild
 enter <id> [-- cmd...]          Enter environment
@@ -90,6 +91,7 @@ doctor                          Check prerequisites
 migrate                         Check store version
 completions <shell>             Shell completions
 man-pages [dir]                 Generate man pages
+tui                             Terminal UI
 ```
 
 ## Workspace
@@ -101,7 +103,7 @@ karapace-schema     Manifest, normalization, lock file, identity
 karapace-store      Objects, layers, metadata, WAL, GC, integrity
 karapace-runtime    Backends (namespace/oci/mock), images, security
 karapace-core       Engine: lifecycle orchestration
-karapace-cli        CLI (23 commands)
+karapace-cli        CLI (25 commands)
 karapace-dbus       D-Bus service (optional)
 karapace-tui        Terminal UI (optional)
 karapace-remote     Remote store client, push/pull

@@ -34,6 +34,25 @@ Defined in `crates/karapace-cli/src/commands/mod.rs`.
 
 ## Commands
 
+### `new`
+
+Generate a new `karapace.toml` manifest in the current directory.
+
+```
+karapace new <name> [--template <template>] [--force]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Human-readable name used in interactive prompts and output |
+
+| Flag | Description |
+|------|-------------|
+| `--template` | One of: `minimal`, `dev`, `gui-dev`, `rust-dev`, `ubuntu-dev` |
+| `--force` | Overwrite `./karapace.toml` if it already exists |
+
+If `--template` is not provided, the command uses interactive prompts (requires a TTY). If `./karapace.toml` exists and `--force` is not set, the command prompts on a TTY; otherwise it fails.
+
 ### `build`
 
 Build an environment from a manifest.
@@ -284,3 +303,13 @@ Check store format version and show migration guidance.
 ```
 karapace migrate
 ```
+
+### `tui`
+
+Start the terminal UI.
+
+```
+karapace tui
+```
+
+This command is interactive and rejects `--json`.
