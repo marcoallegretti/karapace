@@ -4,7 +4,7 @@ All notable changes to Karapace will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — 2.0 Hardening
+## [Unreleased]
 
 ### Breaking Changes
 
@@ -14,19 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`Engine::gc()` requires `&StoreLock`** — compile-time enforcement that callers hold the store lock before garbage collection.
 - **MetadataStore checksum** — `EnvMetadata` now includes an optional `checksum` field (blake3). Written on every `put()`, verified on every `get()`. Backward-compatible via `serde(default)`.
 
-### Added — 2.0 Hardening (M1–M8)
+### Added
 
-- **M1: WAL Crash Safety** — Fixed race windows in `build()` and `restore()` (rollback registered before side-effects). Added WAL protection to `destroy()`, `commit()` (layer manifest rollback), and `gc()` (WAL marker). 8 new WAL crash-safety tests.
-- **M2: Integrity Hardening** — `LayerStore::get()` verifies blake3 hash on every read. `MetadataStore` embeds and verifies blake3 checksum. `verify_store_integrity()` expanded to check objects, layers, and metadata. 4 new integrity tests.
-- **M3: GC Safety** — `Engine::gc()` now requires `&StoreLock` parameter (type-enforced). Snapshot layers whose parent is a live base layer are preserved during GC.
-- **M4: Remote Protocol** — `X-Karapace-Protocol: 1` header sent on all HTTP backend requests (PUT, GET, HEAD). `PROTOCOL_VERSION` constant exported from `karapace-remote`. 4 new header/auth verification tests via header-capturing mock server.
-- **M5: unwrap() Audit** — 0 `unwrap()` in production `src/` code. 4 `Mutex::lock().unwrap()` calls in `MockBackend` replaced with proper `RuntimeError` propagation.
-- **M6: Failure Mode Testing** — 11 new tests: WAL write failure on read-only dir, build failure when WAL dir is read-only (disk-full simulation), stop() SIGTERM with real process (ESRCH path), stop() with non-existent PID, permission denied on object read, read-only metadata dir, concurrent GC lock contention, layer corruption detection, metadata corruption detection, destroy nonexistent env, invalid manifest.
-- **M7: Coverage Expansion** — `verify_store_integrity()` now checks objects + layers + metadata (was objects-only). `IntegrityReport` expanded with `layers_checked/passed` and `metadata_checked/passed` fields. New tests: freeze/archive state transitions, rename environment, verify-store after fresh build, rebuild preserves new and cleans old, HTTP list_blobs, large (1MB) blob roundtrip.
-- **Total: 417 tests** (24 ignored, require privileged operations). Clippy `-D warnings` clean. `cargo fmt` clean. Release build OK.
-
-### Added — 1.0 Preparation
-
+- **WAL crash safety** — Fixed race windows in `build()` and `restore()` (rollback registered before side-effects). Added WAL protection to `destroy()`, `commit()` (layer manifest rollback), and `gc()` (WAL marker).
+- **Integrity hardening** — `LayerStore::get()` verifies blake3 hash on every read. `MetadataStore` embeds and verifies blake3 checksum. `verify_store_integrity()` expanded to check objects, layers, and metadata.
+- **GC safety** — `Engine::gc()` now requires `&StoreLock` parameter (type-enforced). Snapshot layers whose parent is a live base layer are preserved during GC.
+- **Remote protocol headers** — `X-Karapace-Protocol: 1` header sent on all HTTP backend requests (PUT, GET, HEAD). `PROTOCOL_VERSION` constant exported from `karapace-remote`.
+- **unwrap() audit** — 0 `unwrap()` in production code. `Mutex::lock().unwrap()` calls in `MockBackend` replaced with proper `RuntimeError` propagation.
+- **Failure mode tests** — WAL write failure, build on read-only WAL dir, stop() with SIGTERM/non-existent PID, permission denied on object read, read-only metadata dir, concurrent GC lock contention, layer/metadata corruption detection.
+- **Coverage expansion** — `verify_store_integrity()` now checks objects + layers + metadata. `IntegrityReport` expanded with `layers_checked/passed` and `metadata_checked/passed` fields.
 - **Real tar layers** — `pack_layer()`/`unpack_layer()` in karapace-store: deterministic tar creation (sorted entries, zero timestamps, owner 0:0) for regular files, directories, and symlinks. Content-addressed via blake3.
 - **Snapshot system** — `Engine::commit()` captures overlay upper as a tar snapshot; `Engine::restore()` atomically unpacks a snapshot via staging directory swap; `Engine::list_snapshots()` lists snapshots for an environment.
 - **CLI: `snapshots` and `restore`** — new commands for snapshot management.
@@ -34,9 +30,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Newtype wrappers threaded through all structs** — `EnvId`, `ShortId`, `ObjectHash`, `LayerHash` now used in `EnvMetadata` across all 8 crates. Transparent serde for backward compatibility.
 - **Engine::push/pull** — transfer logic moved from `karapace-remote` to `Engine` methods. `karapace-remote` is now pure I/O.
 - **CoreError::Remote** — new error variant for remote operation failures.
-- **CLI stability contract** — `docs/cli-stability.md` defines stable command signatures for 1.x.
+- **CLI stability contract** — `docs/cli-stability.md` defines CLI stability expectations.
 - **Remote protocol spec** — `docs/protocol-v1.md` (v1-draft) documents blob store routes, push/pull protocol, registry format.
-- **Layer limitations doc** — `docs/layer-limitations-v1.md` documents Phase 1 limits (no xattrs, device nodes, hardlinks).
+- **Layer limitations doc** — `docs/layer-limitations.md` documents current limits (no xattrs, device nodes, hardlinks).
 
 ### Changed
 
