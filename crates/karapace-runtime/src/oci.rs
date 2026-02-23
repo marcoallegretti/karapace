@@ -173,8 +173,14 @@ impl RuntimeBackend for OciBackend {
 
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
-        let rootfs = image_cache.ensure_image(&resolved, &progress)?;
+        let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
         let base_image_digest = compute_image_digest(&rootfs)?;
+
+        if spec.offline && !spec.manifest.system_packages.is_empty() {
+            return Err(RuntimeError::ExecFailed(
+                "offline mode: cannot resolve system packages".to_owned(),
+            ));
+        }
 
         let resolved_packages = if spec.manifest.system_packages.is_empty() {
             Vec::new()
@@ -250,15 +256,20 @@ impl RuntimeBackend for OciBackend {
 
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
-        let rootfs = image_cache.ensure_image(&resolved, &progress)?;
+        let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
 
         let mut sandbox = SandboxConfig::new(rootfs.clone(), &spec.env_id, &env_dir);
-        sandbox.isolate_network = spec.manifest.network_isolation;
+        sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
 
         mount_overlay(&sandbox)?;
         setup_container_rootfs(&sandbox)?;
 
         if !spec.manifest.system_packages.is_empty() {
+            if spec.offline {
+                return Err(RuntimeError::ExecFailed(
+                    "offline mode: cannot install system packages".to_owned(),
+                ));
+            }
             let pkg_mgr = detect_package_manager(&sandbox.overlay_merged)
                 .or_else(|| detect_package_manager(&rootfs))
                 .ok_or_else(|| {
@@ -319,7 +330,7 @@ impl RuntimeBackend for OciBackend {
         let rootfs = image_cache.rootfs_path(&resolved.cache_key);
 
         let mut sandbox = SandboxConfig::new(rootfs, &spec.env_id, &env_dir);
-        sandbox.isolate_network = spec.manifest.network_isolation;
+        sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
 
         let host = compute_host_integration(&spec.manifest);
         sandbox.bind_mounts.extend(host.bind_mounts);

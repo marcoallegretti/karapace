@@ -62,10 +62,16 @@ impl RuntimeBackend for NamespaceBackend {
         // Download/cache the base image
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
-        let rootfs = image_cache.ensure_image(&resolved, &progress)?;
+        let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
 
         // Compute content digest of the base image
         let base_image_digest = compute_image_digest(&rootfs)?;
+
+        if spec.offline && !spec.manifest.system_packages.is_empty() {
+            return Err(RuntimeError::ExecFailed(
+                "offline mode: cannot resolve system packages".to_owned(),
+            ));
+        }
 
         // If there are packages to resolve, set up a temporary overlay
         // and install+query to get exact versions
@@ -145,11 +151,11 @@ impl RuntimeBackend for NamespaceBackend {
         // Resolve and download the base image
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
-        let rootfs = image_cache.ensure_image(&resolved, &progress)?;
+        let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
 
         // Set up overlay filesystem
         let mut sandbox = SandboxConfig::new(rootfs.clone(), &spec.env_id, &env_dir);
-        sandbox.isolate_network = spec.manifest.network_isolation;
+        sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
 
         mount_overlay(&sandbox)?;
 
@@ -158,6 +164,11 @@ impl RuntimeBackend for NamespaceBackend {
 
         // Install system packages if any
         if !spec.manifest.system_packages.is_empty() {
+            if spec.offline {
+                return Err(RuntimeError::ExecFailed(
+                    "offline mode: cannot install system packages".to_owned(),
+                ));
+            }
             let pkg_mgr = detect_package_manager(&sandbox.overlay_merged)
                 .or_else(|| detect_package_manager(&rootfs))
                 .ok_or_else(|| {
@@ -216,7 +227,7 @@ impl RuntimeBackend for NamespaceBackend {
 
         // Create sandbox config
         let mut sandbox = SandboxConfig::new(rootfs, &spec.env_id, &env_dir);
-        sandbox.isolate_network = spec.manifest.network_isolation;
+        sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
         sandbox.hostname = format!("karapace-{}", &spec.env_id[..12.min(spec.env_id.len())]);
 
         // Compute host integration (Wayland, PipeWire, GPU, etc.)
