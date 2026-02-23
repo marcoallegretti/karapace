@@ -12,6 +12,25 @@ fn karapace_bin() -> Command {
     cmd
 }
 
+fn write_minimal_manifest(dir: &std::path::Path, base_image: &str) -> std::path::PathBuf {
+    let path = dir.join("karapace.toml");
+    std::fs::write(
+        &path,
+        format!(
+            r#"manifest_version = 1
+
+[base]
+image = "{base_image}"
+
+[runtime]
+backend = "mock"
+"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
 fn temp_store() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
@@ -82,6 +101,80 @@ fn cli_build_succeeds_with_mock() {
         output.status.success(),
         "build must exit 0. stderr: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn cli_pin_check_fails_when_unpinned() {
+    let store = temp_store();
+    let project = tempfile::tempdir().unwrap();
+    let manifest = write_minimal_manifest(project.path(), "rolling");
+
+    let output = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "pin",
+            &manifest.to_string_lossy(),
+            "--check",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "pin --check must fail for unpinned base.image"
+    );
+}
+
+#[test]
+fn cli_pin_check_succeeds_when_pinned_url() {
+    let store = temp_store();
+    let project = tempfile::tempdir().unwrap();
+    let manifest = write_minimal_manifest(project.path(), "https://example.invalid/rootfs.tar.xz");
+
+    let output = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "pin",
+            &manifest.to_string_lossy(),
+            "--check",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "pin --check must exit 0 when already pinned"
+    );
+}
+
+#[test]
+fn cli_build_offline_fails_fast_with_packages() {
+    let store = temp_store();
+    let project = tempfile::tempdir().unwrap();
+    let manifest = write_test_manifest(project.path());
+
+    let output = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "build",
+            &manifest.to_string_lossy(),
+            "--offline",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "build --offline with packages must fail fast"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("offline mode") && stderr.contains("system packages"),
+        "stderr must mention offline + system packages, got: {stderr}"
     );
 }
 

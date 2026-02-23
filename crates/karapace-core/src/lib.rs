@@ -12,7 +12,7 @@ pub mod lifecycle;
 
 pub use concurrency::{install_signal_handler, shutdown_requested, StoreLock};
 pub use drift::{commit_overlay, diff_overlay, export_overlay, DriftReport};
-pub use engine::{BuildResult, Engine};
+pub use engine::{BuildOptions, BuildResult, Engine};
 pub use lifecycle::validate_transition;
 
 use thiserror::Error;

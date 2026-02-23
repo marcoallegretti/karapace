@@ -58,13 +58,16 @@ If `--template` is not provided, the command uses interactive prompts (requires 
 Build an environment from a manifest.
 
 ```
-karapace build [manifest] [--name <name>]
+karapace build [manifest] [--name <name>] [--locked] [--offline] [--require-pinned-image]
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `manifest` | `karapace.toml` | Path to manifest file |
 | `--name` | — | Assign a human-readable name |
+| `--locked` | — | Require existing `karapace.lock` and fail on drift |
+| `--offline` | — | Forbid network (host downloads and container networking) |
+| `--require-pinned-image` | — | Fail if `base.image` is not an http(s) URL |
 
 Executes: parse → normalize → resolve → lock → build. Writes `karapace.lock` next to the manifest. Requires runtime prerequisites (user namespaces, fuse-overlayfs).
 
@@ -73,10 +76,24 @@ Executes: parse → normalize → resolve → lock → build. Writes `karapace.l
 Destroy the existing environment and build a new one from the manifest.
 
 ```
-karapace rebuild [manifest] [--name <name>]
+karapace rebuild [manifest] [--name <name>] [--locked] [--offline] [--require-pinned-image]
 ```
 
 Same arguments as `build`. The old environment is destroyed only after the new one builds successfully.
+
+### `pin`
+
+Rewrite a manifest to use an explicit pinned base image reference.
+
+```
+karapace pin [manifest] [--check] [--write-lock]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `manifest` | `karapace.toml` | Path to manifest file |
+| `--check` | — | Exit non-zero if `base.image` is not already pinned |
+| `--write-lock` | — | After pinning, run a build to write/update `karapace.lock` |
 
 ### `enter`
 

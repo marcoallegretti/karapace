@@ -14,6 +14,7 @@ pub mod list;
 pub mod man_pages;
 pub mod migrate;
 pub mod new;
+pub mod pin;
 pub mod pull;
 pub mod push;
 pub mod rebuild;

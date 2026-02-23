@@ -9,6 +9,8 @@ pub struct RuntimeSpec {
     pub overlay_path: String,
     pub store_root: String,
     pub manifest: NormalizedManifest,
+    #[serde(default)]
+    pub offline: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

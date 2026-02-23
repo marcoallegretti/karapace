@@ -36,6 +36,13 @@ pub struct BuildResult {
     pub lock_file: LockFile,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions {
+    pub locked: bool,
+    pub offline: bool,
+    pub require_pinned_image: bool,
+}
+
 impl Engine {
     /// Create a new engine rooted at the given store directory.
     ///
@@ -148,13 +155,52 @@ impl Engine {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn build(&self, manifest_path: &Path) -> Result<BuildResult, CoreError> {
+        self.build_with_options(manifest_path, BuildOptions::default())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn build_with_options(
+        &self,
+        manifest_path: &Path,
+        options: BuildOptions,
+    ) -> Result<BuildResult, CoreError> {
         info!("building environment from {}", manifest_path.display());
         self.layout.initialize()?;
 
         let manifest = parse_manifest_file(manifest_path)?;
         let normalized = manifest.normalize()?;
+
+        if options.offline && !normalized.system_packages.is_empty() {
+            return Err(CoreError::Runtime(
+                karapace_runtime::RuntimeError::ExecFailed(
+                    "offline mode: cannot resolve system packages".to_owned(),
+                ),
+            ));
+        }
+
+        if options.require_pinned_image
+            && !(normalized.base_image.starts_with("http://")
+                || normalized.base_image.starts_with("https://"))
+        {
+            return Err(CoreError::Manifest(
+                karapace_schema::ManifestError::UnpinnedBaseImage(normalized.base_image.clone()),
+            ));
+        }
+
+        let lock_path = manifest_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("karapace.lock");
+
+        let locked = if options.locked {
+            let lock = LockFile::read_from_file(&lock_path)?;
+            let _ = lock.verify_integrity()?;
+            lock.verify_manifest_intent(&normalized)?;
+            Some(lock)
+        } else {
+            None
+        };
 
         let policy = SecurityPolicy::from_manifest(&normalized);
         policy.validate_mounts(&normalized)?;
@@ -182,6 +228,7 @@ impl Engine {
                 .to_string(),
             store_root: store_str.clone(),
             manifest: normalized.clone(),
+            offline: options.offline,
         };
         let resolution = backend.resolve(&preliminary_spec)?;
         debug!(
@@ -195,6 +242,17 @@ impl Engine {
         // + pinned package versions — not from unresolved names.
         let lock = LockFile::from_resolved(&normalized, &resolution);
         let identity = lock.compute_identity();
+
+        if let Some(existing) = locked {
+            if existing.env_id != identity.env_id.as_str() {
+                return Err(CoreError::Lock(karapace_schema::LockError::ManifestDrift(
+                    format!(
+                        "locked mode: lock env_id '{}' does not match resolved env_id '{}'",
+                        existing.env_id, identity.env_id
+                    ),
+                )));
+            }
+        }
 
         info!(
             "canonical env_id: {} ({})",
@@ -223,6 +281,7 @@ impl Engine {
             overlay_path: env_dir.to_string_lossy().to_string(),
             store_root: store_str,
             manifest: normalized.clone(),
+            offline: options.offline,
         };
         if let Err(e) = backend.build(&spec) {
             let _ = std::fs::remove_dir_all(&env_dir);
@@ -285,11 +344,9 @@ impl Engine {
             }
             self.meta_store.put(&meta)?;
 
-            let lock_path = manifest_path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("karapace.lock");
-            lock.write_to_file(&lock_path)?;
+            if !options.locked {
+                lock.write_to_file(&lock_path)?;
+            }
             Ok(())
         };
 
@@ -322,6 +379,7 @@ impl Engine {
             overlay_path: env_path_str,
             store_root: self.store_root_str.clone(),
             manifest,
+            offline: false,
         }
     }
 
@@ -545,6 +603,14 @@ impl Engine {
     }
 
     pub fn rebuild(&self, manifest_path: &Path) -> Result<BuildResult, CoreError> {
+        self.rebuild_with_options(manifest_path, BuildOptions::default())
+    }
+
+    pub fn rebuild_with_options(
+        &self,
+        manifest_path: &Path,
+        options: BuildOptions,
+    ) -> Result<BuildResult, CoreError> {
         // Collect the old env_id(s) to clean up AFTER a successful build.
         // This ensures we don't lose the old environment if the new build fails.
         let lock_path = manifest_path
@@ -568,7 +634,7 @@ impl Engine {
         }
 
         // Build first — if this fails, old environment is preserved.
-        let result = self.build(manifest_path)?;
+        let result = self.build_with_options(manifest_path, options)?;
 
         // Only destroy the old environment(s) after the new build succeeds.
         for old_id in &old_env_ids {

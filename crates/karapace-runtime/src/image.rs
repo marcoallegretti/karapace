@@ -21,6 +21,11 @@ pub struct ResolvedImage {
     pub display_name: String,
 }
 
+pub fn resolve_pinned_image_url(name: &str) -> Result<String, RuntimeError> {
+    let resolved = resolve_image(name)?;
+    download_url(&resolved.source)
+}
+
 #[allow(clippy::too_many_lines)]
 pub fn resolve_image(name: &str) -> Result<ResolvedImage, RuntimeError> {
     let name = name.trim().to_lowercase();
@@ -248,11 +253,19 @@ impl ImageCache {
         &self,
         resolved: &ResolvedImage,
         progress: &dyn Fn(&str),
+        offline: bool,
     ) -> Result<PathBuf, RuntimeError> {
         let rootfs = self.rootfs_path(&resolved.cache_key);
         if self.is_cached(&resolved.cache_key) {
             progress(&format!("using cached image: {}", resolved.display_name));
             return Ok(rootfs);
+        }
+
+        if offline {
+            return Err(RuntimeError::ExecFailed(format!(
+                "offline mode: base image '{}' is not cached",
+                resolved.display_name
+            )));
         }
 
         std::fs::create_dir_all(&rootfs)?;

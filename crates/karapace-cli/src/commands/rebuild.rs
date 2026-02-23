@@ -1,5 +1,5 @@
 use super::{json_pretty, spin_fail, spin_ok, spinner, EXIT_SUCCESS};
-use karapace_core::{Engine, StoreLock};
+use karapace_core::{BuildOptions, Engine, StoreLock};
 use karapace_store::StoreLayout;
 use std::path::Path;
 
@@ -8,6 +8,7 @@ pub fn run(
     store_path: &Path,
     manifest: &Path,
     name: Option<&str>,
+    options: BuildOptions,
     json: bool,
 ) -> Result<u8, String> {
     let layout = StoreLayout::new(store_path);
@@ -18,7 +19,7 @@ pub fn run(
     } else {
         Some(spinner("rebuilding environment..."))
     };
-    let result = match engine.rebuild(manifest) {
+    let result = match engine.rebuild_with_options(manifest, options) {
         Ok(r) => {
             if let Some(ref pb) = pb {
                 spin_ok(pb, "environment rebuilt");

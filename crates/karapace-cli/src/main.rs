@@ -3,7 +3,7 @@ mod commands;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 use commands::{EXIT_FAILURE, EXIT_MANIFEST_ERROR, EXIT_STORE_ERROR};
-use karapace_core::{install_signal_handler, Engine};
+use karapace_core::{install_signal_handler, BuildOptions, Engine};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -51,6 +51,15 @@ enum Commands {
         /// Human-readable name for the environment.
         #[arg(long)]
         name: Option<String>,
+        /// Require an existing lock file and fail if resolved state would drift.
+        #[arg(long, default_value_t = false)]
+        locked: bool,
+        /// Forbid all network access (host downloads and container networking).
+        #[arg(long, default_value_t = false)]
+        offline: bool,
+        /// Require base.image to be a pinned http(s) URL.
+        #[arg(long, default_value_t = false)]
+        require_pinned_image: bool,
     },
     /// Destroy and rebuild an environment from manifest.
     Rebuild {
@@ -60,6 +69,28 @@ enum Commands {
         /// Human-readable name for the environment.
         #[arg(long)]
         name: Option<String>,
+        /// Require an existing lock file and fail if resolved state would drift.
+        #[arg(long, default_value_t = false)]
+        locked: bool,
+        /// Forbid all network access (host downloads and container networking).
+        #[arg(long, default_value_t = false)]
+        offline: bool,
+        /// Require base.image to be a pinned http(s) URL.
+        #[arg(long, default_value_t = false)]
+        require_pinned_image: bool,
+    },
+
+    /// Rewrite a manifest to use an explicit pinned base image reference.
+    Pin {
+        /// Path to manifest TOML file.
+        #[arg(default_value = "karapace.toml")]
+        manifest: PathBuf,
+        /// Exit non-zero if the manifest is not already pinned.
+        #[arg(long, default_value_t = false)]
+        check: bool,
+        /// After pinning, write/update karapace.lock by running a build.
+        #[arg(long, default_value_t = false)]
+        write_lock: bool,
     },
     /// Enter a built environment (use -- to pass a command instead of interactive shell).
     Enter {
@@ -211,6 +242,10 @@ fn main() -> ExitCode {
             | Commands::Enter { .. }
             | Commands::Exec { .. }
             | Commands::Rebuild { .. }
+            | Commands::Pin {
+                write_lock: true,
+                ..
+            }
             | Commands::Tui
     );
     if needs_runtime && std::env::var("KARAPACE_SKIP_PREREQS").as_deref() != Ok("1") {
@@ -227,20 +262,47 @@ fn main() -> ExitCode {
             template,
             force,
         } => commands::new::run(&name, template.as_deref(), force, json_output),
-        Commands::Build { manifest, name } => commands::build::run(
+        Commands::Build {
+            manifest,
+            name,
+            locked,
+            offline,
+            require_pinned_image,
+        } => commands::build::run(
             &engine,
             &store_path,
             &manifest,
             name.as_deref(),
+            BuildOptions {
+                locked,
+                offline,
+                require_pinned_image,
+            },
             json_output,
         ),
-        Commands::Rebuild { manifest, name } => commands::rebuild::run(
+        Commands::Rebuild {
+            manifest,
+            name,
+            locked,
+            offline,
+            require_pinned_image,
+        } => commands::rebuild::run(
             &engine,
             &store_path,
             &manifest,
             name.as_deref(),
+            BuildOptions {
+                locked,
+                offline,
+                require_pinned_image,
+            },
             json_output,
         ),
+        Commands::Pin {
+            manifest,
+            check,
+            write_lock,
+        } => commands::pin::run(&manifest, check, write_lock, json_output, Some(&store_path)),
         Commands::Enter { env_id, command } => {
             commands::enter::run(&engine, &store_path, &env_id, &command)
         }

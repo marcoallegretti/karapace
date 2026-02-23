@@ -173,6 +173,7 @@ image = "rolling"
             overlay_path: dir.join("overlay").to_string_lossy().to_string(),
             store_root: dir.to_string_lossy().to_string(),
             manifest,
+            offline: false,
         }
     }
 
@@ -217,6 +218,7 @@ backend = "mock"
             overlay_path: dir.path().join("overlay").to_string_lossy().to_string(),
             store_root: dir.path().to_string_lossy().to_string(),
             manifest,
+            offline: false,
         };
 
         let backend = MockBackend::new();
