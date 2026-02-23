@@ -8,9 +8,7 @@ pub fn run(
     store_path: &Path,
     manifest: &Path,
     name: Option<&str>,
-    locked: bool,
-    offline: bool,
-    require_pinned_image: bool,
+    options: BuildOptions,
     json: bool,
 ) -> Result<u8, String> {
     let layout = StoreLayout::new(store_path);
@@ -21,12 +19,6 @@ pub fn run(
     } else {
         Some(spinner("building environment..."))
     };
-    let options = BuildOptions {
-        locked,
-        offline,
-        require_pinned_image,
-    };
-
     let result = match engine.build_with_options(manifest, options) {
         Ok(r) => {
             if let Some(ref pb) = pb {

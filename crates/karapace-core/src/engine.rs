@@ -172,9 +172,11 @@ impl Engine {
         let normalized = manifest.normalize()?;
 
         if options.offline && !normalized.system_packages.is_empty() {
-            return Err(CoreError::Runtime(karapace_runtime::RuntimeError::ExecFailed(
-                "offline mode: cannot resolve system packages".to_owned(),
-            )));
+            return Err(CoreError::Runtime(
+                karapace_runtime::RuntimeError::ExecFailed(
+                    "offline mode: cannot resolve system packages".to_owned(),
+                ),
+            ));
         }
 
         if options.require_pinned_image

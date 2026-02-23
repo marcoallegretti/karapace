@@ -3,7 +3,7 @@ mod commands;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 use commands::{EXIT_FAILURE, EXIT_MANIFEST_ERROR, EXIT_STORE_ERROR};
-use karapace_core::{install_signal_handler, Engine};
+use karapace_core::{install_signal_handler, BuildOptions, Engine};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -273,9 +273,11 @@ fn main() -> ExitCode {
             &store_path,
             &manifest,
             name.as_deref(),
-            locked,
-            offline,
-            require_pinned_image,
+            BuildOptions {
+                locked,
+                offline,
+                require_pinned_image,
+            },
             json_output,
         ),
         Commands::Rebuild {
@@ -289,22 +291,18 @@ fn main() -> ExitCode {
             &store_path,
             &manifest,
             name.as_deref(),
-            locked,
-            offline,
-            require_pinned_image,
+            BuildOptions {
+                locked,
+                offline,
+                require_pinned_image,
+            },
             json_output,
         ),
         Commands::Pin {
             manifest,
             check,
             write_lock,
-        } => commands::pin::run(
-            &manifest,
-            check,
-            write_lock,
-            json_output,
-            Some(&store_path),
-        ),
+        } => commands::pin::run(&manifest, check, write_lock, json_output, Some(&store_path)),
         Commands::Enter { env_id, command } => {
             commands::enter::run(&engine, &store_path, &env_id, &command)
         }

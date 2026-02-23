@@ -32,8 +32,8 @@ pub fn run(
     json: bool,
     store_path: Option<&Path>,
 ) -> Result<u8, String> {
-    let manifest = parse_manifest_file(manifest_path)
-        .map_err(|e| format!("failed to parse manifest: {e}"))?;
+    let manifest =
+        parse_manifest_file(manifest_path).map_err(|e| format!("failed to parse manifest: {e}"))?;
 
     if check {
         if is_pinned(&manifest.base.image) {
@@ -65,9 +65,7 @@ pub fn run(
     if write_lock {
         let store = store_path.ok_or_else(|| "internal error: missing store path".to_owned())?;
         let engine = karapace_core::Engine::new(store);
-        engine
-            .build(manifest_path)
-            .map_err(|e| e.to_string())?;
+        engine.build(manifest_path).map_err(|e| e.to_string())?;
     }
 
     if json {
