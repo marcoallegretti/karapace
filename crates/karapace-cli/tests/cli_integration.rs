@@ -178,6 +178,85 @@ fn cli_build_offline_fails_fast_with_packages() {
     );
 }
 
+#[test]
+fn cli_snapshots_restore_hash_matches_commit() {
+    let store = temp_store();
+    let project = tempfile::tempdir().unwrap();
+    let manifest = write_minimal_manifest(project.path(), "rolling");
+
+    let build_out = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "--json",
+            "build",
+            &manifest.to_string_lossy(),
+            "--name",
+            "demo",
+        ])
+        .output()
+        .unwrap();
+    assert!(build_out.status.success());
+
+    let commit_out = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "--json",
+            "commit",
+            "demo",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        commit_out.status.success(),
+        "commit must exit 0. stderr: {}",
+        String::from_utf8_lossy(&commit_out.stderr)
+    );
+    let commit_stdout = String::from_utf8_lossy(&commit_out.stdout);
+    let commit_json: serde_json::Value = serde_json::from_str(&commit_stdout)
+        .unwrap_or_else(|e| panic!("commit --json must produce valid JSON: {e}\n{commit_stdout}"));
+    let commit_hash = commit_json["snapshot_hash"].as_str().unwrap().to_owned();
+
+    let snaps_out = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "--json",
+            "snapshots",
+            "demo",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        snaps_out.status.success(),
+        "snapshots must exit 0. stderr: {}",
+        String::from_utf8_lossy(&snaps_out.stderr)
+    );
+    let snaps_stdout = String::from_utf8_lossy(&snaps_out.stdout);
+    let snaps_json: serde_json::Value = serde_json::from_str(&snaps_stdout).unwrap_or_else(|e| {
+        panic!("snapshots --json must produce valid JSON: {e}\nstdout: {snaps_stdout}")
+    });
+    let restore_hash = snaps_json["snapshots"][0]["restore_hash"].as_str().unwrap();
+    assert_eq!(restore_hash, commit_hash);
+
+    let restore_out = karapace_bin()
+        .args([
+            "--store",
+            &store.path().to_string_lossy(),
+            "restore",
+            "demo",
+            restore_hash,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        restore_out.status.success(),
+        "restore must exit 0. stderr: {}",
+        String::from_utf8_lossy(&restore_out.stderr)
+    );
+}
+
 // A5: CLI Validation — list with JSON output
 #[test]
 fn cli_list_json_output_stable() {
