@@ -212,6 +212,19 @@ enum Commands {
 
 #[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info.to_string();
+        if msg.contains("Broken pipe")
+            || msg.contains("broken pipe")
+            || msg.contains("os error 32")
+            || msg.contains("failed printing to stdout")
+        {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+
     let cli = Cli::parse();
 
     let default_level = if cli.trace {
