@@ -15,7 +15,7 @@ RestartSec=2
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%h/.local/share/karapace
-PrivateTmp=true
+PrivateTmp=false
 NoNewPrivileges=true
 
 [Install]
