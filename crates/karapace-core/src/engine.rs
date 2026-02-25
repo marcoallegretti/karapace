@@ -112,10 +112,10 @@ impl Engine {
 
         // Use preliminary identity from manifest (not resolved yet).
         // This is sufficient for the Defined state; build will re-resolve.
-        let identity = compute_env_id(&normalized);
+        let identity = compute_env_id(&normalized)?;
 
         if !self.meta_store.exists(&identity.env_id) {
-            let manifest_json = normalized.canonical_json();
+            let manifest_json = normalized.canonical_json()?;
             let manifest_hash = self.obj_store.put(manifest_json.as_bytes())?;
 
             let now = chrono::Utc::now().to_rfc3339();
@@ -225,7 +225,7 @@ impl Engine {
         // Phase 1: Resolve dependencies through the backend.
         // This downloads the base image, computes its content digest,
         // and queries the package manager for exact versions.
-        let preliminary_id = compute_env_id(&normalized);
+        let preliminary_id = compute_env_id(&normalized)?;
         let preliminary_spec = RuntimeSpec {
             env_id: preliminary_id.env_id.to_string(),
             root_path: self
@@ -272,7 +272,8 @@ impl Engine {
         );
 
         // Phase 3: Build the environment, then capture real filesystem layers.
-        let manifest_hash = self.obj_store.put(normalized.canonical_json().as_bytes())?;
+        let manifest_json = normalized.canonical_json()?;
+        let manifest_hash = self.obj_store.put(manifest_json.as_bytes())?;
 
         let env_dir = self.layout.env_path(&identity.env_id);
 
@@ -639,7 +640,7 @@ impl Engine {
         if old_env_ids.is_empty() {
             let manifest = parse_manifest_file(manifest_path)?;
             let normalized = manifest.normalize()?;
-            let identity = compute_env_id(&normalized);
+            let identity = compute_env_id(&normalized)?;
             if self.meta_store.exists(&identity.env_id) {
                 old_env_ids.push(identity.env_id.to_string());
             }
@@ -953,7 +954,7 @@ impl Engine {
     ) -> Result<(ManifestV1, NormalizedManifest, EnvIdentity), CoreError> {
         let manifest = parse_manifest_file(manifest_path)?;
         let normalized = manifest.normalize()?;
-        let identity = compute_env_id(&normalized);
+        let identity = compute_env_id(&normalized)?;
         Ok((manifest, normalized, identity))
     }
 }

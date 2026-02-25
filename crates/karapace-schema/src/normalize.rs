@@ -74,8 +74,8 @@ impl ManifestV1 {
 }
 
 impl NormalizedManifest {
-    pub fn canonical_json(&self) -> String {
-        serde_json::to_string(self).expect("normalized manifest serialization is infallible")
+    pub fn canonical_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -175,7 +175,7 @@ packages = ["clang", "git"]
         .normalize()
         .unwrap();
 
-        assert_eq!(a.canonical_json(), b.canonical_json());
+        assert_eq!(a.canonical_json().unwrap(), b.canonical_json().unwrap());
     }
 
     #[test]
