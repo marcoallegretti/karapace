@@ -500,7 +500,10 @@ impl Engine {
 
         if meta.state != EnvState::Running {
             return Err(CoreError::Runtime(
-                karapace_runtime::RuntimeError::NotRunning(env_id.to_owned()),
+                karapace_runtime::RuntimeError::NotRunning(format!(
+                    "{} (state: {})",
+                    env_id, meta.state
+                )),
             ));
         }
 
