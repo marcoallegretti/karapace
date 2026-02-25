@@ -519,6 +519,54 @@ mod tests {
 
     #[test]
     fn oci_status_reports_not_running() {
+        use std::ffi::OsString;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _lock = ENV_LOCK.lock().unwrap();
+
+        struct PathGuard {
+            old_path: OsString,
+        }
+        impl Drop for PathGuard {
+            fn drop(&mut self) {
+                std::env::set_var("PATH", &self.old_path);
+            }
+        }
+
+        let fake_bin = tempfile::tempdir().unwrap();
+        let fake_crun = fake_bin.path().join("crun");
+
+        std::fs::write(
+            &fake_crun,
+            "#!/bin/sh\n\
+if [ \"$1\" = \"--version\" ]; then\n\
+  echo crun-test\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"state\" ]; then\n\
+  echo \"container does not exist\" 1>&2\n\
+  exit 1\n\
+fi\n\
+exit 1\n",
+        )
+        .unwrap();
+
+        let mut perms = std::fs::metadata(&fake_crun).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake_crun, perms).unwrap();
+
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let _guard = PathGuard {
+            old_path: old_path.clone(),
+        };
+        let joined = std::env::join_paths(
+            std::iter::once(fake_bin.path().to_path_buf()).chain(std::env::split_paths(&old_path)),
+        )
+        .unwrap();
+        std::env::set_var("PATH", joined);
+
         let dir = tempfile::tempdir().unwrap();
         let backend = OciBackend::with_store_root(dir.path());
         let status = backend.status("oci-test").unwrap();
