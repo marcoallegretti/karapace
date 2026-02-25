@@ -1,4 +1,5 @@
 use crate::layout::StoreLayout;
+use crate::metadata::{EnvMetadata, EnvState, MetadataStore};
 use crate::StoreError;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -6,6 +7,17 @@ use std::io::Write;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tracing::{debug, info, warn};
+
+fn parse_env_state(s: &str) -> Option<EnvState> {
+    match s {
+        "Defined" | "defined" => Some(EnvState::Defined),
+        "Built" | "built" => Some(EnvState::Built),
+        "Running" | "running" => Some(EnvState::Running),
+        "Frozen" | "frozen" => Some(EnvState::Frozen),
+        "Archived" | "archived" => Some(EnvState::Archived),
+        _ => None,
+    }
+}
 
 /// A single rollback step that can undo part of an operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,34 +208,50 @@ impl WriteAheadLog {
                     env_id,
                     target_state,
                 } => {
-                    // Resolve metadata dir from wal_dir (wal_dir = root/store/wal)
-                    if let Some(store_dir) = self.wal_dir.parent() {
-                        let metadata_dir = store_dir.join("metadata");
-                        let meta_path = metadata_dir.join(env_id);
-                        if meta_path.exists() {
-                            match fs::read_to_string(&meta_path) {
-                                Ok(content) => {
-                                    if let Ok(mut meta) =
-                                        serde_json::from_str::<serde_json::Value>(&content)
-                                    {
-                                        meta["state"] =
-                                            serde_json::Value::String(target_state.clone());
-                                        if let Ok(updated) = serde_json::to_string_pretty(&meta) {
-                                            if let Err(e) = fs::write(&meta_path, updated) {
-                                                warn!("WAL rollback: failed to reset state for {env_id}: {e}");
-                                            } else {
-                                                debug!("WAL rollback: reset {env_id} state to {target_state}");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "WAL rollback: failed to read metadata for {env_id}: {e}"
-                                    );
-                                }
-                            }
+                    let Some(new_state) = parse_env_state(target_state) else {
+                        warn!("WAL rollback: unknown target state '{target_state}' for {env_id}");
+                        continue;
+                    };
+
+                    // wal_dir = <root>/store/wal
+                    let Some(store_dir) = self.wal_dir.parent() else {
+                        continue;
+                    };
+                    let Some(root_dir) = store_dir.parent() else {
+                        continue;
+                    };
+
+                    let meta_path = store_dir.join("metadata").join(env_id);
+                    if !meta_path.exists() {
+                        continue;
+                    }
+
+                    let content = match fs::read_to_string(&meta_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("WAL rollback: failed to read metadata for {env_id}: {e}");
+                            continue;
                         }
+                    };
+
+                    let mut meta: EnvMetadata = match serde_json::from_str(&content) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("WAL rollback: failed to parse metadata for {env_id}: {e}");
+                            continue;
+                        }
+                    };
+
+                    meta.state = new_state;
+                    meta.updated_at = chrono::Utc::now().to_rfc3339();
+                    meta.checksum = None;
+
+                    let layout = StoreLayout::new(root_dir);
+                    let meta_store = MetadataStore::new(layout);
+                    if let Err(e) = meta_store.put(&meta) {
+                        warn!("WAL rollback: failed to persist metadata for {env_id}: {e}");
+                    } else {
+                        debug!("WAL rollback: reset {env_id} state to {target_state}");
                     }
                 }
             }

@@ -4,7 +4,7 @@ use karapace_schema::manifest::{
     parse_manifest_str, BaseSection, GuiSection, HardwareSection, ManifestV1, MountsSection,
     RuntimeSection, SystemSection,
 };
-use std::io::{stdin, IsTerminal};
+use std::io::{stderr, stdin, IsTerminal};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -87,12 +87,14 @@ fn print_result(name: &str, template: Option<&str>, json: bool) -> Result<(), St
 
 pub fn run(name: &str, template: Option<&str>, force: bool, json: bool) -> Result<u8, String> {
     let dest = Path::new(DEST_MANIFEST);
-    let is_tty = stdin().is_terminal();
-    ensure_can_write(dest, force, is_tty)?;
+    let is_tty = stdin().is_terminal() && stderr().is_terminal();
 
     let mut manifest = if let Some(tpl) = template {
-        load_template(tpl)?
+        let m = load_template(tpl)?;
+        ensure_can_write(dest, force, is_tty)?;
+        m
     } else {
+        ensure_can_write(dest, force, is_tty)?;
         if !is_tty {
             return Err("no --template provided and stdin is not a TTY".to_owned());
         }

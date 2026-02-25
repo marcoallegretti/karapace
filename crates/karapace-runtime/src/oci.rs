@@ -11,7 +11,7 @@ use crate::sandbox::{
 use crate::terminal;
 use crate::RuntimeError;
 use karapace_schema::{ResolutionResult, ResolvedPackage};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 pub struct OciBackend {
@@ -451,35 +451,45 @@ impl RuntimeBackend for OciBackend {
     }
 
     fn status(&self, env_id: &str) -> Result<RuntimeStatus, RuntimeError> {
-        let env_dir = self.env_dir(env_id);
-        let running_file = env_dir.join(".running");
+        let runtime = Self::find_runtime().ok_or_else(|| {
+            RuntimeError::BackendUnavailable("no OCI runtime found (crun/runc/youki)".to_owned())
+        })?;
 
-        if running_file.exists() {
-            let pid_str = std::fs::read_to_string(&running_file).unwrap_or_default();
-            let pid = pid_str.trim().parse::<u32>().ok();
-            if pid.is_none() && !pid_str.trim().is_empty() {
-                tracing::warn!(
-                    "corrupt .running file for {}: could not parse PID from '{}'",
-                    &env_id[..12.min(env_id.len())],
-                    pid_str.trim()
-                );
+        let container_id = format!("karapace-{}", &env_id[..12.min(env_id.len())]);
+        let output = Command::new(&runtime)
+            .args(["state", &container_id])
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let msg = stderr.to_lowercase();
+            if msg.contains("does not exist") || msg.contains("not found") {
+                return Ok(RuntimeStatus {
+                    env_id: env_id.to_owned(),
+                    running: false,
+                    pid: None,
+                });
             }
-            if let Some(p) = pid {
-                if Path::new(&format!("/proc/{p}")).exists() {
-                    return Ok(RuntimeStatus {
-                        env_id: env_id.to_owned(),
-                        running: true,
-                        pid: Some(p),
-                    });
-                }
-                let _ = std::fs::remove_file(&running_file);
-            }
+            return Err(RuntimeError::ExecFailed(format!(
+                "{runtime} state failed: {}",
+                stderr.trim()
+            )));
         }
+
+        let state: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+            RuntimeError::ExecFailed(format!("failed to parse {runtime} state output: {e}"))
+        })?;
+
+        let pid = state
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|p| u32::try_from(p).ok())
+            .filter(|p| *p != 0);
 
         Ok(RuntimeStatus {
             env_id: env_id.to_owned(),
-            running: false,
-            pid: None,
+            running: pid.is_some(),
+            pid,
         })
     }
 }

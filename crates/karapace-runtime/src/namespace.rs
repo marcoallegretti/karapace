@@ -5,12 +5,14 @@ use crate::image::{
     parse_version_output, query_versions_command, resolve_image, ImageCache,
 };
 use crate::sandbox::{
-    enter_interactive, exec_in_container, install_packages_in_container, mount_overlay,
-    setup_container_rootfs, unmount_overlay, SandboxConfig,
+    exec_in_container, install_packages_in_container, mount_overlay, setup_container_rootfs,
+    spawn_enter_interactive, unmount_overlay, SandboxConfig,
 };
 use crate::terminal;
 use crate::RuntimeError;
 use karapace_schema::{ResolutionResult, ResolvedPackage};
+use libc::{SIGKILL, SIGTERM};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 
 pub struct NamespaceBackend {
@@ -237,12 +239,7 @@ impl RuntimeBackend for NamespaceBackend {
 
         // Mount overlay
         mount_overlay(&sandbox)?;
-
-        // Set up rootfs
         setup_container_rootfs(&sandbox)?;
-
-        // Mark as running
-        std::fs::write(env_dir.join(".running"), format!("{}", std::process::id()))?;
 
         // Emit terminal markers
         terminal::emit_container_push(&spec.env_id, &sandbox.hostname);
@@ -252,8 +249,38 @@ impl RuntimeBackend for NamespaceBackend {
             &sandbox.hostname,
         );
 
-        // Enter the container interactively
-        let exit_code = enter_interactive(&sandbox);
+        // Spawn the sandbox so we can record the host PID for `stop`.
+        let mut child = match spawn_enter_interactive(&sandbox) {
+            Ok(c) => c,
+            Err(e) => {
+                terminal::emit_container_pop();
+                terminal::print_container_exit(&spec.env_id);
+                let _ = unmount_overlay(&sandbox);
+                return Err(e);
+            }
+        };
+
+        if let Err(e) = std::fs::write(env_dir.join(".running"), format!("{}", child.id())) {
+            let _ = child.kill();
+            terminal::emit_container_pop();
+            terminal::print_container_exit(&spec.env_id);
+            let _ = unmount_overlay(&sandbox);
+            return Err(e.into());
+        }
+
+        // Wait for the interactive session to complete.
+        let exit_code = match child.wait() {
+            Ok(status) => {
+                let code = status.code().unwrap_or_else(|| match status.signal() {
+                    Some(sig) if sig == SIGTERM || sig == SIGKILL => 0,
+                    _ => 1,
+                });
+                Ok(code)
+            }
+            Err(e) => Err(RuntimeError::ExecFailed(format!(
+                "failed to wait for sandbox: {e}"
+            ))),
+        };
 
         // Cleanup
         terminal::emit_container_pop();

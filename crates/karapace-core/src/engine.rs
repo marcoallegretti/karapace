@@ -56,26 +56,38 @@ impl Engine {
         let layer_store = LayerStore::new(layout.clone());
         let wal = WriteAheadLog::new(&layout);
 
-        // Recover any incomplete operations from a previous crash
-        if let Err(e) = wal.recover() {
-            warn!("WAL recovery failed: {e}");
-        }
+        // Recovery mutates the store and must not run concurrently with a live
+        // operation holding the store lock (e.g. an interactive `enter`).
+        match StoreLock::try_acquire(&layout.lock_file()) {
+            Ok(Some(_lock)) => {
+                // Recover any incomplete operations from a previous crash
+                if let Err(e) = wal.recover() {
+                    warn!("WAL recovery failed: {e}");
+                }
 
-        // Clean up stale .running markers left by a crash during enter/exec.
-        // After WAL recovery, any env still marked Running was mid-operation.
-        let env_base = layout.env_dir();
-        if env_base.exists() {
-            if let Ok(entries) = std::fs::read_dir(&env_base) {
-                for entry in entries.flatten() {
-                    let running_marker = entry.path().join(".running");
-                    if running_marker.exists() {
-                        debug!(
-                            "removing stale .running marker: {}",
-                            running_marker.display()
-                        );
-                        let _ = std::fs::remove_file(&running_marker);
+                // Clean up stale .running markers left by a crash during enter/exec.
+                // After WAL recovery, any env still marked Running was mid-operation.
+                let env_base = layout.env_dir();
+                if env_base.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&env_base) {
+                        for entry in entries.flatten() {
+                            let running_marker = entry.path().join(".running");
+                            if running_marker.exists() {
+                                debug!(
+                                    "removing stale .running marker: {}",
+                                    running_marker.display()
+                                );
+                                let _ = std::fs::remove_file(&running_marker);
+                            }
+                        }
                     }
                 }
+            }
+            Ok(None) => {
+                debug!("store lock held; skipping WAL recovery and stale marker cleanup");
+            }
+            Err(e) => {
+                warn!("store lock check failed; skipping WAL recovery: {e}");
             }
         }
 

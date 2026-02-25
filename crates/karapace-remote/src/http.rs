@@ -1,4 +1,5 @@
 use crate::{BlobKind, RemoteBackend, RemoteConfig, RemoteError};
+use std::io::Read;
 
 /// HTTP-based remote store backend.
 ///
@@ -56,9 +57,10 @@ impl HttpBackend {
             req = req.header("Authorization", &format!("Bearer {token}"));
         }
         let resp = req.call().map_err(|e| RemoteError::Http(e.to_string()))?;
-        let body = resp
-            .into_body()
-            .read_to_vec()
+        let mut reader = resp.into_body().into_reader();
+        let mut body = Vec::new();
+        reader
+            .read_to_end(&mut body)
             .map_err(|e| RemoteError::Http(e.to_string()))?;
         Ok(body)
     }
@@ -195,7 +197,7 @@ mod tests {
 
                         let mut body = vec![0u8; content_length];
                         if content_length > 0 {
-                            let _ = std::io::Read::read_exact(&mut reader, &mut body);
+                            let _ = reader.read_exact(&mut body);
                         }
 
                         let mut data = store.lock().unwrap();
