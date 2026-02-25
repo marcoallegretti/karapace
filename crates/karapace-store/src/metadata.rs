@@ -48,13 +48,12 @@ pub struct EnvMetadata {
 
 impl EnvMetadata {
     /// Compute the checksum over the metadata content (excluding the checksum field itself).
-    fn compute_checksum(&self) -> String {
+    fn compute_checksum(&self) -> Result<String, StoreError> {
         let mut copy = self.clone();
         copy.checksum = None;
         // Serialize without the checksum field (skip_serializing_if = None)
-        let json =
-            serde_json::to_string_pretty(&copy).expect("infallible: EnvMetadata always serializes");
-        blake3::hash(json.as_bytes()).to_hex().to_string()
+        let json = serde_json::to_string_pretty(&copy)?;
+        Ok(blake3::hash(json.as_bytes()).to_hex().to_string())
     }
 }
 
@@ -89,7 +88,7 @@ impl MetadataStore {
 
         // Compute and embed checksum before writing
         let mut meta_with_checksum = meta.clone();
-        meta_with_checksum.checksum = Some(meta_with_checksum.compute_checksum());
+        meta_with_checksum.checksum = Some(meta_with_checksum.compute_checksum()?);
         let content = serde_json::to_string_pretty(&meta_with_checksum)?;
 
         let dir = self.layout.metadata_dir();
@@ -112,7 +111,7 @@ impl MetadataStore {
 
         // Verify checksum if present (backward-compatible: legacy files have None)
         if let Some(ref expected) = meta.checksum {
-            let actual = meta.compute_checksum();
+            let actual = meta.compute_checksum()?;
             if actual != *expected {
                 return Err(StoreError::IntegrityFailure {
                     hash: env_id.to_owned(),
