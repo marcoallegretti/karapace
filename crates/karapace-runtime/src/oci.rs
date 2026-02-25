@@ -416,7 +416,7 @@ impl RuntimeBackend for OciBackend {
         let rootfs = image_cache.rootfs_path(&resolved.cache_key);
 
         let mut sandbox = SandboxConfig::new(rootfs, &spec.env_id, &env_dir);
-        sandbox.isolate_network = spec.manifest.network_isolation;
+        sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
 
         let host = compute_host_integration(&spec.manifest);
         sandbox.bind_mounts.extend(host.bind_mounts);
