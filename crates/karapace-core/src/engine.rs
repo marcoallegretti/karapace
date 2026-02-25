@@ -56,17 +56,14 @@ impl Engine {
         let layer_store = LayerStore::new(layout.clone());
         let wal = WriteAheadLog::new(&layout);
 
-        // Recovery mutates the store and must not run concurrently with a live
-        // operation holding the store lock (e.g. an interactive `enter`).
+        // Recovery mutates the store; avoid running it while the store is locked.
         match StoreLock::try_acquire(&layout.lock_file()) {
             Ok(Some(_lock)) => {
-                // Recover any incomplete operations from a previous crash
                 if let Err(e) = wal.recover() {
                     warn!("WAL recovery failed: {e}");
                 }
 
-                // Clean up stale .running markers left by a crash during enter/exec.
-                // After WAL recovery, any env still marked Running was mid-operation.
+                // Clean up stale .running markers.
                 let env_base = layout.env_dir();
                 if env_base.exists() {
                     if let Ok(entries) = std::fs::read_dir(&env_base) {
@@ -110,8 +107,6 @@ impl Engine {
         let manifest = parse_manifest_file(manifest_path)?;
         let normalized = manifest.normalize()?;
 
-        // Use preliminary identity from manifest (not resolved yet).
-        // This is sufficient for the Defined state; build will re-resolve.
         let identity = compute_env_id(&normalized)?;
 
         if !self.meta_store.exists(&identity.env_id) {
@@ -136,8 +131,6 @@ impl Engine {
             self.meta_store.put(&meta)?;
         }
 
-        // Generate a preliminary lock with mock resolution
-        // (no real image digest or package versions yet).
         let preliminary_resolution = ResolutionResult {
             base_image_digest: blake3::hash(
                 format!("unresolved:{}", normalized.base_image).as_bytes(),
@@ -222,9 +215,6 @@ impl Engine {
         let store_str = self.store_root_str.clone();
         let backend = select_backend(&normalized.runtime_backend, &store_str)?;
 
-        // Phase 1: Resolve dependencies through the backend.
-        // This downloads the base image, computes its content digest,
-        // and queries the package manager for exact versions.
         let preliminary_id = compute_env_id(&normalized)?;
         let preliminary_spec = RuntimeSpec {
             env_id: preliminary_id.env_id.to_string(),
@@ -249,9 +239,6 @@ impl Engine {
             &resolution.base_image_digest[..12]
         );
 
-        // Phase 2: Generate the lock file from resolved data.
-        // The env_id is computed from the locked state — content digest
-        // + pinned package versions — not from unresolved names.
         let lock = LockFile::from_resolved(&normalized, &resolution);
         let identity = lock.compute_identity();
 
@@ -271,19 +258,15 @@ impl Engine {
             identity.env_id, identity.short_id
         );
 
-        // Phase 3: Build the environment, then capture real filesystem layers.
         let manifest_json = normalized.canonical_json()?;
         let manifest_hash = self.obj_store.put(manifest_json.as_bytes())?;
 
         let env_dir = self.layout.env_path(&identity.env_id);
 
-        // Begin WAL entry before creating side effects
         self.wal.initialize()?;
         let wal_op = self.wal.begin(WalOpKind::Build, &identity.env_id)?;
 
-        // Register rollback BEFORE the side-effect so a crash between
-        // create_dir_all and add_rollback_step cannot orphan the directory.
-        // rollback_entry already checks path.exists(), so a no-op if dir was never created.
+        // Register rollback before creating side effects.
         self.wal
             .add_rollback_step(&wal_op, RollbackStep::RemoveDir(env_dir.clone()))?;
         std::fs::create_dir_all(&env_dir)?;
@@ -302,14 +285,10 @@ impl Engine {
             return Err(e.into());
         }
 
-        // Capture the overlay upper directory as a real tar layer.
-        // The upper dir contains all filesystem changes made during build
-        // (installed packages, config files, etc.).
         let upper_dir = self.layout.upper_dir(&identity.env_id);
         let build_tar = if upper_dir.exists() {
             pack_layer(&upper_dir)?
         } else {
-            // No upper dir (shouldn't happen with real backends, but handle gracefully)
             Vec::new()
         };
         let build_tar_hash = self.obj_store.put(&build_tar)?;
@@ -329,8 +308,6 @@ impl Engine {
         };
         let base_layer_hash = self.layer_store.put(&base_layer)?;
 
-        // No separate dependency layers — the build tar captures everything.
-        // Individual package tracking is in the lock file, not the layer store.
         let dep_layers = Vec::new();
 
         let now = chrono::Utc::now().to_rfc3339();
@@ -349,8 +326,6 @@ impl Engine {
             checksum: None,
         };
 
-        // Phase 4: Write metadata and lock file.
-        // If either fails after a successful build, clean up the orphaned env_dir.
         let finalize = || -> Result<(), CoreError> {
             if let Ok(existing) = self.meta_store.get(&identity.env_id) {
                 validate_transition(existing.state, EnvState::Built)?;
