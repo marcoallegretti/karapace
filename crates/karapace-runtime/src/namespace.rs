@@ -328,7 +328,20 @@ impl RuntimeBackend for NamespaceBackend {
         let running_file = env_dir.join(".running");
 
         if running_file.exists() {
-            let pid_str = std::fs::read_to_string(&running_file).unwrap_or_default();
+            let pid_str = match std::fs::read_to_string(&running_file) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        "failed to read .running file for {}: {e}",
+                        &env_id[..12.min(env_id.len())]
+                    );
+                    return Ok(RuntimeStatus {
+                        env_id: env_id.to_owned(),
+                        running: false,
+                        pid: None,
+                    });
+                }
+            };
             let pid = pid_str.trim().parse::<u32>().ok();
             if pid.is_none() && !pid_str.trim().is_empty() {
                 tracing::warn!(
@@ -336,6 +349,7 @@ impl RuntimeBackend for NamespaceBackend {
                     &env_id[..12.min(env_id.len())],
                     pid_str.trim()
                 );
+                let _ = std::fs::remove_file(&running_file);
             }
             // Check if process is actually alive
             if let Some(p) = pid {
