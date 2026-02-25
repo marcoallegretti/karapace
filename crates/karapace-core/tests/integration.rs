@@ -42,7 +42,6 @@ backend = "mock"
     )
 }
 
-// §11.2: Build → Destroy → Rebuild equality
 #[test]
 fn build_destroy_rebuild_produces_identical_env_id() {
     let store = tempfile::tempdir().unwrap();
@@ -66,7 +65,6 @@ fn build_destroy_rebuild_produces_identical_env_id() {
     );
 }
 
-// §11.2: Multi-environment isolation
 #[test]
 fn multi_environment_isolation() {
     let store = tempfile::tempdir().unwrap();
@@ -1588,7 +1586,6 @@ fn stop_succeeds_when_metadata_stale_but_running_marker_exists() {
     let r = engine.build(&manifest).unwrap();
     let env_id = r.identity.env_id.to_string();
 
-    // Spawn a real sleep process and wait on it later to avoid zombie
     let mut child = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
@@ -1596,14 +1593,12 @@ fn stop_succeeds_when_metadata_stale_but_running_marker_exists() {
     let pid = child.id();
     let pid_i32 = i32::try_from(pid).expect("pid fits in i32");
 
-    // Leave metadata state as Built but write .running marker with real PID.
     let env_dir = store.path().join("env").join(&env_id);
     fs::create_dir_all(&env_dir).unwrap();
     fs::write(env_dir.join(".running"), pid.to_string()).unwrap();
 
     let result = engine.stop(&env_id);
 
-    // Clean up the real process regardless of result
     unsafe {
         libc::kill(pid_i32, libc::SIGKILL);
     }
@@ -1615,7 +1610,6 @@ fn stop_succeeds_when_metadata_stale_but_running_marker_exists() {
         result.err()
     );
 
-    // Verify state remains Built
     let meta = engine.inspect(&env_id).unwrap();
     assert_eq!(meta.state, EnvState::Built);
 }
@@ -1630,7 +1624,6 @@ fn stop_preserves_frozen_state() {
     let r = engine.build(&manifest).unwrap();
     let env_id = r.identity.env_id.to_string();
 
-    // Spawn a real sleep process and wait on it later to avoid zombie
     let mut child = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
@@ -1638,7 +1631,6 @@ fn stop_preserves_frozen_state() {
     let pid = child.id();
     let pid_i32 = i32::try_from(pid).expect("pid fits in i32");
 
-    // Set metadata to Frozen and write .running marker with real PID.
     let layout = StoreLayout::new(store.path());
     let meta_store = karapace_store::MetadataStore::new(layout.clone());
     meta_store.update_state(&env_id, EnvState::Frozen).unwrap();
@@ -1649,7 +1641,6 @@ fn stop_preserves_frozen_state() {
 
     let result = engine.stop(&env_id);
 
-    // Clean up the real process regardless of result
     unsafe {
         libc::kill(pid_i32, libc::SIGKILL);
     }
@@ -1670,29 +1661,24 @@ fn stale_running_marker_cleaned_on_engine_new() {
     let store = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
 
-    // Build an environment so we have an env_dir
     let engine = Engine::new(store.path());
     let manifest = write_manifest(project.path(), &mock_manifest(&["git"]));
     let result = engine.build(&manifest);
     assert!(result.is_ok());
     let env_id = result.unwrap().identity.env_id;
 
-    // Manually create a stale .running marker (simulates a crash)
     let env_dir = store.path().join("env").join(&*env_id);
     fs::create_dir_all(&env_dir).unwrap();
     let running_marker = env_dir.join(".running");
     fs::write(&running_marker, "stale").unwrap();
     assert!(running_marker.exists());
 
-    // Creating a new Engine should clean up the stale marker
     let _engine2 = Engine::new(store.path());
     assert!(
         !running_marker.exists(),
         "stale .running marker must be removed by Engine::new()"
     );
 }
-
-// --- §7: Disk-full / write-failure simulation ---
 
 #[test]
 fn build_on_readonly_objects_dir_returns_error() {

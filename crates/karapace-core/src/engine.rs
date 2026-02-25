@@ -582,9 +582,7 @@ impl Engine {
                     ));
                 }
             } else {
-                // Give it a moment to clean up
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                // Force kill if still running
                 if Path::new(&format!("/proc/{pid}")).exists() {
                     warn!("process {pid} did not exit after SIGTERM, sending SIGKILL");
                     // SAFETY: same as above — valid pid and signal.
@@ -600,7 +598,6 @@ impl Engine {
             }
         }
 
-        // Clean up running marker
         let running_file = self.layout.env_path(env_id).join(".running");
         let _ = std::fs::remove_file(running_file);
 
