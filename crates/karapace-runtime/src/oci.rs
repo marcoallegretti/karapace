@@ -463,7 +463,10 @@ impl RuntimeBackend for OciBackend {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let msg = stderr.to_lowercase();
-            if msg.contains("does not exist") || msg.contains("not found") {
+            if msg.contains("does not exist")
+                || msg.contains("not found")
+                || msg.contains("no such file or directory")
+            {
                 return Ok(RuntimeStatus {
                     env_id: env_id.to_owned(),
                     running: false,
