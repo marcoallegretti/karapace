@@ -3,7 +3,7 @@ use karapace_server::Store;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Parser)]
 #[command(name = "karapace-server", about = "Karapace remote protocol v1 server")]
@@ -27,7 +27,13 @@ fn main() {
 
     let cli = Cli::parse();
 
-    fs::create_dir_all(&cli.data_dir).expect("failed to create data directory");
+    if let Err(e) = fs::create_dir_all(&cli.data_dir) {
+        error!(
+            "failed to create data directory {}: {e}",
+            cli.data_dir.display()
+        );
+        std::process::exit(1);
+    }
 
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("starting karapace-server on {addr}");
