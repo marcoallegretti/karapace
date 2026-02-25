@@ -498,7 +498,58 @@ impl Engine {
             .get(env_id)
             .map_err(|_| CoreError::EnvNotFound(env_id.to_owned()))?;
 
-        if meta.state != EnvState::Running {
+        let target_state = if meta.state == EnvState::Running {
+            EnvState::Built
+        } else {
+            meta.state
+        };
+
+        let normalized = self.load_manifest(&meta.manifest_hash)?;
+        let store_str = self.store_root_str.clone();
+        let backend = select_backend(&normalized.runtime_backend, &store_str)?;
+
+        let running_file = self.layout.env_path(env_id).join(".running");
+        let has_marker = running_file.exists();
+        let allow_marker_pid_fallback =
+            normalized.runtime_backend == "namespace" || normalized.runtime_backend == "mock";
+
+        let marker_pid = if has_marker && allow_marker_pid_fallback {
+            match std::fs::read_to_string(&running_file) {
+                Ok(s) => {
+                    let pid_str = s.trim();
+                    let pid = pid_str.parse::<u32>().ok();
+                    if let Some(p) = pid {
+                        if Path::new(&format!("/proc/{p}")).exists() {
+                            Some(p)
+                        } else {
+                            let _ = std::fs::remove_file(&running_file);
+                            None
+                        }
+                    } else {
+                        if !pid_str.is_empty() {
+                            let _ = std::fs::remove_file(&running_file);
+                        }
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let status = backend.status(env_id);
+        let (runtime_running, runtime_pid) = match status {
+            Ok(s) => (s.running, s.pid),
+            Err(e) => {
+                if meta.state == EnvState::Running || has_marker {
+                    return Err(e.into());
+                }
+                (false, None)
+            }
+        };
+
+        if meta.state != EnvState::Running && !runtime_running && marker_pid.is_none() {
             return Err(CoreError::Runtime(
                 karapace_runtime::RuntimeError::NotRunning(format!(
                     "{} (state: {})",
@@ -507,12 +558,9 @@ impl Engine {
             ));
         }
 
-        let normalized = self.load_manifest(&meta.manifest_hash)?;
-        let store_str = self.store_root_str.clone();
-        let backend = select_backend(&normalized.runtime_backend, &store_str)?;
-        let status = backend.status(env_id)?;
+        let pid_to_kill = runtime_pid.or(marker_pid);
 
-        if let Some(pid) = status.pid {
+        if let Some(pid) = pid_to_kill {
             let pid_i32 = i32::try_from(pid).map_err(|_| {
                 CoreError::Runtime(karapace_runtime::RuntimeError::ExecFailed(format!(
                     "invalid pid {pid}: exceeds i32 range"
@@ -556,7 +604,7 @@ impl Engine {
         let running_file = self.layout.env_path(env_id).join(".running");
         let _ = std::fs::remove_file(running_file);
 
-        self.meta_store.update_state(env_id, EnvState::Built)?;
+        self.meta_store.update_state(env_id, target_state)?;
         Ok(())
     }
 
