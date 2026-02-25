@@ -6,6 +6,27 @@ use std::fs;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
+struct Blake3Writer<'a> {
+    hasher: &'a mut blake3::Hasher,
+}
+
+impl<'a> Blake3Writer<'a> {
+    fn new(hasher: &'a mut blake3::Hasher) -> Self {
+        Self { hasher }
+    }
+}
+
+impl Write for Blake3Writer<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.hasher.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EnvState {
     Defined,
@@ -51,9 +72,17 @@ impl EnvMetadata {
     fn compute_checksum(&self) -> Result<String, StoreError> {
         let mut copy = self.clone();
         copy.checksum = None;
-        // Serialize without the checksum field (skip_serializing_if = None)
-        let json = serde_json::to_string_pretty(&copy)?;
-        Ok(blake3::hash(json.as_bytes()).to_hex().to_string())
+
+        // Serialize without the checksum field (skip_serializing_if = None).
+        // Use streaming serialization to avoid allocating a full pretty-JSON string.
+        let mut hasher = blake3::Hasher::new();
+        {
+            let writer = Blake3Writer::new(&mut hasher);
+            let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
+            let mut ser = serde_json::Serializer::with_formatter(writer, formatter);
+            copy.serialize(&mut ser)?;
+        }
+        Ok(hasher.finalize().to_hex().to_string())
     }
 }
 
@@ -279,6 +308,18 @@ mod tests {
         assert_eq!(meta.ref_count, retrieved.ref_count);
         // Verify checksum was written
         assert!(retrieved.checksum.is_some(), "put() must embed a checksum");
+    }
+
+    #[test]
+    fn checksum_matches_to_string_pretty_hash() {
+        let meta = sample_meta();
+        let mut copy = meta.clone();
+        copy.checksum = None;
+
+        let json = serde_json::to_string_pretty(&copy).unwrap();
+        let expected = blake3::hash(json.as_bytes()).to_hex().to_string();
+        let actual = meta.compute_checksum().unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
