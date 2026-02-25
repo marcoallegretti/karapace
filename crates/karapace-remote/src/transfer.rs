@@ -86,8 +86,9 @@ pub fn push_env(
     // 7. Update registry if key provided
     if let Some(key) = registry_key {
         let mut registry = match backend.get_registry() {
-            Ok(data) => Registry::from_bytes(&data).unwrap_or_default(),
-            Err(_) => Registry::new(),
+            Ok(data) => Registry::from_bytes(&data)?,
+            Err(RemoteError::NotFound(_)) => Registry::new(),
+            Err(e) => return Err(e),
         };
         registry.publish(
             key,
