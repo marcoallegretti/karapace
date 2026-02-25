@@ -49,7 +49,6 @@ impl RuntimeBackend for NamespaceBackend {
     }
 
     fn available(&self) -> bool {
-        // Check that user namespaces work
         let output = std::process::Command::new("unshare")
             .args(["--user", "--map-root-user", "--fork", "true"])
             .output();
@@ -61,12 +60,10 @@ impl RuntimeBackend for NamespaceBackend {
             eprintln!("[karapace] {msg}");
         };
 
-        // Download/cache the base image
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
         let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
 
-        // Compute content digest of the base image
         let base_image_digest = compute_image_digest(&rootfs)?;
 
         if spec.offline && !spec.manifest.system_packages.is_empty() {
@@ -75,8 +72,6 @@ impl RuntimeBackend for NamespaceBackend {
             ));
         }
 
-        // If there are packages to resolve, set up a temporary overlay
-        // and install+query to get exact versions
         let resolved_packages = if spec.manifest.system_packages.is_empty() {
             Vec::new()
         } else {
@@ -86,13 +81,11 @@ impl RuntimeBackend for NamespaceBackend {
             std::fs::create_dir_all(&tmp_env)?;
 
             let mut sandbox = SandboxConfig::new(rootfs.clone(), "resolve-tmp", &tmp_env);
-            sandbox.isolate_network = false; // need network for package resolution
+            sandbox.isolate_network = false;
 
             mount_overlay(&sandbox)?;
             setup_container_rootfs(&sandbox)?;
 
-            // Run resolution inside an inner closure so cleanup always runs,
-            // even if detect/install/query fails.
             let resolve_inner = || -> Result<Vec<(String, String)>, RuntimeError> {
                 let pkg_mgr = detect_package_manager(&sandbox.overlay_merged)
                     .or_else(|| detect_package_manager(&rootfs))
@@ -113,13 +106,11 @@ impl RuntimeBackend for NamespaceBackend {
 
             let result = resolve_inner();
 
-            // Always cleanup: unmount overlay and remove temp directory
             let _ = unmount_overlay(&sandbox);
             let _ = std::fs::remove_dir_all(&tmp_env);
 
             let versions = result?;
 
-            // Map back to ResolvedPackage, falling back to "unresolved" if query failed
             spec.manifest
                 .system_packages
                 .iter()
@@ -150,21 +141,17 @@ impl RuntimeBackend for NamespaceBackend {
             eprintln!("[karapace] {msg}");
         };
 
-        // Resolve and download the base image
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
         let rootfs = image_cache.ensure_image(&resolved, &progress, spec.offline)?;
 
-        // Set up overlay filesystem
         let mut sandbox = SandboxConfig::new(rootfs.clone(), &spec.env_id, &env_dir);
         sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
 
         mount_overlay(&sandbox)?;
 
-        // Set up container rootfs (create dirs, user, etc.)
         setup_container_rootfs(&sandbox)?;
 
-        // Install system packages if any
         if !spec.manifest.system_packages.is_empty() {
             if spec.offline {
                 return Err(RuntimeError::ExecFailed(
@@ -192,10 +179,8 @@ impl RuntimeBackend for NamespaceBackend {
             progress("packages installed");
         }
 
-        // Unmount overlay after build (will be re-mounted on enter)
         unmount_overlay(&sandbox)?;
 
-        // Write state marker
         std::fs::write(env_dir.join(".built"), "1")?;
 
         progress(&format!(
@@ -216,7 +201,6 @@ impl RuntimeBackend for NamespaceBackend {
             )));
         }
 
-        // Resolve image to get rootfs path
         let resolved = resolve_image(&spec.manifest.base_image)?;
         let image_cache = ImageCache::new(&self.store_root);
         let rootfs = image_cache.rootfs_path(&resolved.cache_key);
@@ -227,21 +211,17 @@ impl RuntimeBackend for NamespaceBackend {
             ));
         }
 
-        // Create sandbox config
         let mut sandbox = SandboxConfig::new(rootfs, &spec.env_id, &env_dir);
         sandbox.isolate_network = spec.offline || spec.manifest.network_isolation;
         sandbox.hostname = format!("karapace-{}", &spec.env_id[..12.min(spec.env_id.len())]);
 
-        // Compute host integration (Wayland, PipeWire, GPU, etc.)
         let host = compute_host_integration(&spec.manifest);
         sandbox.bind_mounts.extend(host.bind_mounts);
         sandbox.env_vars.extend(host.env_vars);
 
-        // Mount overlay
         mount_overlay(&sandbox)?;
         setup_container_rootfs(&sandbox)?;
 
-        // Emit terminal markers
         terminal::emit_container_push(&spec.env_id, &sandbox.hostname);
         terminal::print_container_banner(
             &spec.env_id,
@@ -249,7 +229,6 @@ impl RuntimeBackend for NamespaceBackend {
             &sandbox.hostname,
         );
 
-        // Spawn the sandbox so we can record the host PID for `stop`.
         let mut child = match spawn_enter_interactive(&sandbox) {
             Ok(c) => c,
             Err(e) => {
