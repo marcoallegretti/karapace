@@ -3,8 +3,6 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Shell-escape a string for safe interpolation into shell scripts.
-/// Wraps the value in single quotes, escaping any embedded single quotes.
 fn shell_quote(s: &str) -> String {
     // Single-quoting in POSIX shell: replace ' with '\'' then wrap in '
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -80,10 +78,8 @@ impl SandboxConfig {
 }
 
 pub fn mount_overlay(config: &SandboxConfig) -> Result<(), RuntimeError> {
-    // Unmount any stale overlay from a previous failed run
     let _ = unmount_overlay(config);
 
-    // Clean stale work dir (fuse-overlayfs requires a clean workdir)
     if config.overlay_work.exists() {
         let _ = std::fs::remove_dir_all(&config.overlay_work);
     }
@@ -147,7 +143,6 @@ pub fn unmount_overlay(config: &SandboxConfig) -> Result<(), RuntimeError> {
     if !config.overlay_merged.exists() {
         return Ok(());
     }
-    // Only attempt unmount if actually mounted (avoids spurious errors)
     if !is_mounted(&config.overlay_merged) {
         return Ok(());
     }
@@ -156,7 +151,6 @@ pub fn unmount_overlay(config: &SandboxConfig) -> Result<(), RuntimeError> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    // Fallback if fusermount3 is not available
     if is_mounted(&config.overlay_merged) {
         let _ = Command::new("fusermount")
             .args(["-u", &config.overlay_merged.to_string_lossy()])
@@ -170,7 +164,6 @@ pub fn unmount_overlay(config: &SandboxConfig) -> Result<(), RuntimeError> {
 pub fn setup_container_rootfs(config: &SandboxConfig) -> Result<PathBuf, RuntimeError> {
     let merged = &config.overlay_merged;
 
-    // Essential directories inside the container
     for subdir in [
         "proc", "sys", "dev", "dev/pts", "dev/shm", "tmp", "run", "run/user", "etc", "var",
         "var/tmp",
@@ -178,11 +171,9 @@ pub fn setup_container_rootfs(config: &SandboxConfig) -> Result<PathBuf, Runtime
         std::fs::create_dir_all(merged.join(subdir))?;
     }
 
-    // Create run/user/<uid> for XDG_RUNTIME_DIR
     let user_run = merged.join(format!("run/user/{}", config.uid));
     std::fs::create_dir_all(&user_run)?;
 
-    // Create home directory
     let container_home = merged.join(
         config
             .home_dir
@@ -191,15 +182,12 @@ pub fn setup_container_rootfs(config: &SandboxConfig) -> Result<PathBuf, Runtime
     );
     std::fs::create_dir_all(&container_home)?;
 
-    // Write /etc/hostname
     let _ = std::fs::write(merged.join("etc/hostname"), &config.hostname);
 
-    // Ensure /etc/resolv.conf exists (copy from host for DNS)
     if !merged.join("etc/resolv.conf").exists() && Path::new("/etc/resolv.conf").exists() {
         let _ = std::fs::copy("/etc/resolv.conf", merged.join("etc/resolv.conf"));
     }
 
-    // Ensure user exists in /etc/passwd
     ensure_user_in_container(config, merged)?;
 
     Ok(merged.clone())
@@ -269,16 +257,12 @@ fn build_setup_script(config: &SandboxConfig) -> String {
     let qm = shell_quote_path(merged);
     let mut script = String::new();
 
-    // Mount /proc
     let _ = writeln!(script, "mount -t proc proc {qm}/proc 2>/dev/null || true");
 
-    // Bind mount /sys (read-only)
     let _ = writeln!(script, "mount --rbind /sys {qm}/sys 2>/dev/null && mount --make-rslave {qm}/sys 2>/dev/null || true");
 
-    // Bind mount /dev
     let _ = writeln!(script, "mount --rbind /dev {qm}/dev 2>/dev/null && mount --make-rslave {qm}/dev 2>/dev/null || true");
 
-    // Bind mount home directory
     let container_home = merged.join(
         config
             .home_dir
@@ -292,13 +276,10 @@ fn build_setup_script(config: &SandboxConfig) -> String {
         shell_quote_path(&container_home)
     );
 
-    // Bind mount /etc/resolv.conf for DNS resolution
     let _ = writeln!(script, "touch {qm}/etc/resolv.conf 2>/dev/null; mount --bind /etc/resolv.conf {qm}/etc/resolv.conf 2>/dev/null || true");
 
-    // Bind mount /tmp
     let _ = writeln!(script, "mount --bind /tmp {qm}/tmp 2>/dev/null || true");
 
-    // Bind mounts from config (user-supplied paths — must be quoted)
     for bm in &config.bind_mounts {
         let target = if bm.target.is_absolute() {
             merged.join(bm.target.strip_prefix("/").unwrap_or(&bm.target))
@@ -316,7 +297,6 @@ fn build_setup_script(config: &SandboxConfig) -> String {
         }
     }
 
-    // Bind mount XDG_RUNTIME_DIR sockets (Wayland, PipeWire, D-Bus)
     if let Ok(xdg_run) = std::env::var("XDG_RUNTIME_DIR") {
         let container_run = merged.join(format!("run/user/{}", config.uid));
         for socket in &["wayland-0", "pipewire-0", "pulse/native", "bus"] {
@@ -332,7 +312,6 @@ fn build_setup_script(config: &SandboxConfig) -> String {
                         shell_quote_path(parent)
                     );
                 }
-                // For sockets, touch the target first
                 if src.is_file() || !src.is_dir() {
                     let _ = writeln!(script, "touch {qd} 2>/dev/null || true");
                 }
@@ -341,7 +320,6 @@ fn build_setup_script(config: &SandboxConfig) -> String {
         }
     }
 
-    // Bind mount X11 socket if present
     if Path::new("/tmp/.X11-unix").exists() {
         let _ = writeln!(
             script,
@@ -349,7 +327,6 @@ fn build_setup_script(config: &SandboxConfig) -> String {
         );
     }
 
-    // Chroot and exec
     let _ = writeln!(script, "exec chroot {qm} /bin/sh -s <<'__KARAPACE_EOF__'");
 
     script
@@ -360,16 +337,14 @@ pub fn enter_interactive(config: &SandboxConfig) -> Result<i32, RuntimeError> {
 
     let mut setup = build_setup_script(config);
 
-    // Build environment variable exports (all values shell-quoted, keys validated)
     let mut env_exports = String::new();
     for (key, val) in &config.env_vars {
         if !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            continue; // Skip keys with unsafe characters
+            continue;
         }
         let _ = write!(env_exports, "export {}={}; ", key, shell_quote(val));
     }
 
-    // Set standard env vars (all values shell-quoted)
     let _ = write!(
         env_exports,
         "export HOME={}; ",
@@ -409,7 +384,6 @@ pub fn enter_interactive(config: &SandboxConfig) -> Result<i32, RuntimeError> {
         shell_quote(&config.hostname)
     );
 
-    // Determine shell
     let shell = if merged.join("bin/bash").exists() || merged.join("usr/bin/bash").exists() {
         "/bin/bash"
     } else {
@@ -424,7 +398,6 @@ pub fn enter_interactive(config: &SandboxConfig) -> Result<i32, RuntimeError> {
     let mut cmd = build_unshare_command(config);
     cmd.arg("/bin/sh").arg("-c").arg(&setup);
 
-    // Pass through stdin/stdout/stderr for interactive use
     cmd.stdin(std::process::Stdio::inherit());
     cmd.stdout(std::process::Stdio::inherit());
     cmd.stderr(std::process::Stdio::inherit());
@@ -443,16 +416,14 @@ pub fn spawn_enter_interactive(
 
     let mut setup = build_setup_script(config);
 
-    // Build environment variable exports (all values shell-quoted, keys validated)
     let mut env_exports = String::new();
     for (key, val) in &config.env_vars {
         if !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            continue; // Skip keys with unsafe characters
+            continue;
         }
         let _ = write!(env_exports, "export {}={}; ", key, shell_quote(val));
     }
 
-    // Set standard env vars (all values shell-quoted)
     let _ = write!(
         env_exports,
         "export HOME={}; ",
@@ -492,7 +463,6 @@ pub fn spawn_enter_interactive(
         shell_quote(&config.hostname)
     );
 
-    // Determine shell
     let shell = if merged.join("bin/bash").exists() || merged.join("usr/bin/bash").exists() {
         "/bin/bash"
     } else {
@@ -507,7 +477,6 @@ pub fn spawn_enter_interactive(
     let mut cmd = build_unshare_command(config);
     cmd.arg("/bin/sh").arg("-c").arg(&setup);
 
-    // Pass through stdin/stdout/stderr for interactive use
     cmd.stdin(std::process::Stdio::inherit());
     cmd.stdout(std::process::Stdio::inherit());
     cmd.stderr(std::process::Stdio::inherit());
@@ -522,11 +491,10 @@ pub fn exec_in_container(
 ) -> Result<std::process::Output, RuntimeError> {
     let mut setup = build_setup_script(config);
 
-    // Environment (all values shell-quoted, keys validated)
     let mut env_exports = String::new();
     for (key, val) in &config.env_vars {
         if !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            continue; // Skip keys with unsafe characters
+            continue;
         }
         let _ = write!(env_exports, "export {}={}; ", key, shell_quote(val));
     }
