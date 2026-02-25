@@ -70,17 +70,44 @@ pub struct EnvMetadata {
 impl EnvMetadata {
     /// Compute the checksum over the metadata content (excluding the checksum field itself).
     fn compute_checksum(&self) -> Result<String, StoreError> {
-        let mut copy = self.clone();
-        copy.checksum = None;
+        #[derive(Serialize)]
+        struct ChecksumView<'a> {
+            env_id: &'a EnvId,
+            short_id: &'a ShortId,
+            #[serde(default)]
+            name: &'a Option<String>,
+            state: &'a EnvState,
+            manifest_hash: &'a ObjectHash,
+            base_layer: &'a LayerHash,
+            dependency_layers: &'a Vec<LayerHash>,
+            policy_layer: &'a Option<LayerHash>,
+            created_at: &'a String,
+            updated_at: &'a String,
+            ref_count: &'a u32,
+        }
 
-        // Serialize without the checksum field (skip_serializing_if = None).
+        let view = ChecksumView {
+            env_id: &self.env_id,
+            short_id: &self.short_id,
+            name: &self.name,
+            state: &self.state,
+            manifest_hash: &self.manifest_hash,
+            base_layer: &self.base_layer,
+            dependency_layers: &self.dependency_layers,
+            policy_layer: &self.policy_layer,
+            created_at: &self.created_at,
+            updated_at: &self.updated_at,
+            ref_count: &self.ref_count,
+        };
+
+        // Serialize without the checksum field.
         // Use streaming serialization to avoid allocating a full pretty-JSON string.
         let mut hasher = blake3::Hasher::new();
         {
             let writer = Blake3Writer::new(&mut hasher);
             let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
             let mut ser = serde_json::Serializer::with_formatter(writer, formatter);
-            copy.serialize(&mut ser)?;
+            view.serialize(&mut ser)?;
         }
         Ok(hasher.finalize().to_hex().to_string())
     }
