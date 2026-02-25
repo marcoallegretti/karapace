@@ -60,6 +60,10 @@ karapace commit <env_id>
 karapace restore <env_id> <snapshot_hash>
 ```
 
+![Create a manifest](docs/imgs/Screenshot_20260225_105438.png)
+
+![Build and inspect an environment](docs/imgs/Screenshot_20260225_110322.png)
+
 See `examples/` for more manifests: `minimal.toml`, `dev.toml`, `gui-dev.toml`, `ubuntu-dev.toml`, `rust-dev.toml`.
 
 ## Commands
@@ -120,6 +124,7 @@ karapace-server     Reference HTTP server
 
 ## Documentation
 
+- [Getting Started](docs/getting-started.md)
 - [Architecture](docs/architecture.md)
 - [CLI Reference](docs/cli-reference.md)
 - [Storage Format](docs/storage-format.md)

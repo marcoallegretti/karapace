@@ -1,4 +1,5 @@
 use crate::{BlobKind, RemoteBackend, RemoteConfig, RemoteError};
+use std::io::Read;
 
 /// HTTP-based remote store backend.
 ///
@@ -55,10 +56,32 @@ impl HttpBackend {
         if let Some(ref token) = self.config.auth_token {
             req = req.header("Authorization", &format!("Bearer {token}"));
         }
-        let resp = req.call().map_err(|e| RemoteError::Http(e.to_string()))?;
-        let body = resp
-            .into_body()
-            .read_to_vec()
+        let resp = match req.call() {
+            Ok(r) => r,
+            Err(ureq::Error::StatusCode(404)) => {
+                return Err(RemoteError::NotFound(url.to_owned()));
+            }
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(RemoteError::Http(format!("HTTP {code} for {url}")));
+            }
+            Err(e) => {
+                return Err(RemoteError::Http(e.to_string()));
+            }
+        };
+
+        let status = resp.status();
+        let code = status.as_u16();
+        if code == 404 {
+            return Err(RemoteError::NotFound(url.to_owned()));
+        }
+        if code >= 400 {
+            return Err(RemoteError::Http(format!("HTTP {code} for {url}")));
+        }
+
+        let mut reader = resp.into_body().into_reader();
+        let mut body = Vec::new();
+        reader
+            .read_to_end(&mut body)
             .map_err(|e| RemoteError::Http(e.to_string()))?;
         Ok(body)
     }
@@ -71,8 +94,11 @@ impl HttpBackend {
         if let Some(ref token) = self.config.auth_token {
             req = req.header("Authorization", &format!("Bearer {token}"));
         }
-        let resp = req.call().map_err(|e| RemoteError::Http(e.to_string()))?;
-        Ok(resp.status().into())
+        match req.call() {
+            Ok(resp) => Ok(resp.status().into()),
+            Err(ureq::Error::StatusCode(code)) => Ok(code),
+            Err(e) => Err(RemoteError::Http(e.to_string())),
+        }
     }
 }
 
@@ -92,9 +118,10 @@ impl RemoteBackend for HttpBackend {
     fn has_blob(&self, kind: BlobKind, key: &str) -> Result<bool, RemoteError> {
         let url = self.url(kind, key);
         tracing::debug!("HEAD {url}");
-        match self.do_head(&url) {
-            Ok(status) => Ok(status == 200),
-            Err(_) => Ok(false),
+        match self.do_head(&url)? {
+            200 => Ok(true),
+            404 => Ok(false),
+            code => Err(RemoteError::Http(format!("HTTP {code} for HEAD {url}"))),
         }
     }
 
@@ -195,7 +222,7 @@ mod tests {
 
                         let mut body = vec![0u8; content_length];
                         if content_length > 0 {
-                            let _ = std::io::Read::read_exact(&mut reader, &mut body);
+                            let _ = reader.read_exact(&mut body);
                         }
 
                         let mut data = store.lock().unwrap();

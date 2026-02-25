@@ -1,4 +1,5 @@
 use crate::layout::StoreLayout;
+use crate::metadata::{EnvMetadata, EnvState, MetadataStore};
 use crate::StoreError;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,21 +8,27 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tracing::{debug, info, warn};
 
-/// A single rollback step that can undo part of an operation.
+fn parse_env_state(s: &str) -> Option<EnvState> {
+    match s {
+        "Defined" | "defined" => Some(EnvState::Defined),
+        "Built" | "built" => Some(EnvState::Built),
+        "Running" | "running" => Some(EnvState::Running),
+        "Frozen" | "frozen" => Some(EnvState::Frozen),
+        "Archived" | "archived" => Some(EnvState::Archived),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RollbackStep {
-    /// Remove a directory tree (e.g. orphaned env_dir).
     RemoveDir(PathBuf),
-    /// Remove a single file (e.g. metadata, layer manifest).
     RemoveFile(PathBuf),
-    /// Reset an environment's metadata state (e.g. Running → Built after crash).
     ResetState {
         env_id: String,
         target_state: String,
     },
 }
 
-/// The type of mutating operation being tracked.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WalOpKind {
     Build,
@@ -49,7 +56,6 @@ impl std::fmt::Display for WalOpKind {
     }
 }
 
-/// A WAL entry representing an in-flight operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalEntry {
     pub op_id: String,
@@ -59,11 +65,6 @@ pub struct WalEntry {
     pub rollback_steps: Vec<RollbackStep>,
 }
 
-/// Write-ahead log for crash recovery.
-///
-/// Mutating engine methods create a WAL entry before starting work,
-/// append rollback steps as side effects occur, and remove the entry
-/// on successful completion. On startup, incomplete entries are rolled back.
 pub struct WriteAheadLog {
     wal_dir: PathBuf,
 }
@@ -74,13 +75,11 @@ impl WriteAheadLog {
         Self { wal_dir }
     }
 
-    /// Ensure the WAL directory exists.
     pub fn initialize(&self) -> Result<(), StoreError> {
         fs::create_dir_all(&self.wal_dir)?;
         Ok(())
     }
 
-    /// Begin a new WAL entry for an operation. Returns the op_id.
     pub fn begin(&self, kind: WalOpKind, env_id: &str) -> Result<String, StoreError> {
         let op_id = format!(
             "{}-{}",
@@ -99,7 +98,6 @@ impl WriteAheadLog {
         Ok(op_id)
     }
 
-    /// Append a rollback step to an existing WAL entry.
     pub fn add_rollback_step(&self, op_id: &str, step: RollbackStep) -> Result<(), StoreError> {
         let mut entry = self.read_entry(op_id)?;
         entry.rollback_steps.push(step);
@@ -107,7 +105,6 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    /// Commit (remove) a WAL entry after successful completion.
     pub fn commit(&self, op_id: &str) -> Result<(), StoreError> {
         let path = self.entry_path(op_id);
         if path.exists() {
@@ -117,7 +114,6 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    /// List all incomplete WAL entries.
     pub fn list_incomplete(&self) -> Result<Vec<WalEntry>, StoreError> {
         if !self.wal_dir.exists() {
             return Ok(Vec::new());
@@ -132,7 +128,6 @@ impl WriteAheadLog {
                         Ok(entry) => entries.push(entry),
                         Err(e) => {
                             warn!("corrupt WAL entry {}: {e}", path.display());
-                            // Remove corrupt entries
                             let _ = fs::remove_file(&path);
                         }
                     },
@@ -147,8 +142,6 @@ impl WriteAheadLog {
         Ok(entries)
     }
 
-    /// Roll back all incomplete WAL entries.
-    /// Returns the number of entries rolled back.
     pub fn recover(&self) -> Result<usize, StoreError> {
         let entries = self.list_incomplete()?;
         let count = entries.len();
@@ -158,7 +151,6 @@ impl WriteAheadLog {
                 entry.kind, entry.env_id, entry.op_id
             );
             self.rollback_entry(entry);
-            // Remove the WAL entry after rollback
             let _ = fs::remove_file(self.entry_path(&entry.op_id));
         }
         if count > 0 {
@@ -168,7 +160,6 @@ impl WriteAheadLog {
     }
 
     fn rollback_entry(&self, entry: &WalEntry) {
-        // Execute rollback steps in reverse order
         for step in entry.rollback_steps.iter().rev() {
             match step {
                 RollbackStep::RemoveDir(path) => {
@@ -196,34 +187,49 @@ impl WriteAheadLog {
                     env_id,
                     target_state,
                 } => {
-                    // Resolve metadata dir from wal_dir (wal_dir = root/store/wal)
-                    if let Some(store_dir) = self.wal_dir.parent() {
-                        let metadata_dir = store_dir.join("metadata");
-                        let meta_path = metadata_dir.join(env_id);
-                        if meta_path.exists() {
-                            match fs::read_to_string(&meta_path) {
-                                Ok(content) => {
-                                    if let Ok(mut meta) =
-                                        serde_json::from_str::<serde_json::Value>(&content)
-                                    {
-                                        meta["state"] =
-                                            serde_json::Value::String(target_state.clone());
-                                        if let Ok(updated) = serde_json::to_string_pretty(&meta) {
-                                            if let Err(e) = fs::write(&meta_path, updated) {
-                                                warn!("WAL rollback: failed to reset state for {env_id}: {e}");
-                                            } else {
-                                                debug!("WAL rollback: reset {env_id} state to {target_state}");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "WAL rollback: failed to read metadata for {env_id}: {e}"
-                                    );
-                                }
-                            }
+                    let Some(new_state) = parse_env_state(target_state) else {
+                        warn!("WAL rollback: unknown target state '{target_state}' for {env_id}");
+                        continue;
+                    };
+
+                    let Some(store_dir) = self.wal_dir.parent() else {
+                        continue;
+                    };
+                    let Some(root_dir) = store_dir.parent() else {
+                        continue;
+                    };
+
+                    let meta_path = store_dir.join("metadata").join(env_id);
+                    if !meta_path.exists() {
+                        continue;
+                    }
+
+                    let content = match fs::read_to_string(&meta_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("WAL rollback: failed to read metadata for {env_id}: {e}");
+                            continue;
                         }
+                    };
+
+                    let mut meta: EnvMetadata = match serde_json::from_str(&content) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("WAL rollback: failed to parse metadata for {env_id}: {e}");
+                            continue;
+                        }
+                    };
+
+                    meta.state = new_state;
+                    meta.updated_at = chrono::Utc::now().to_rfc3339();
+                    meta.checksum = None;
+
+                    let layout = StoreLayout::new(root_dir);
+                    let meta_store = MetadataStore::new(layout);
+                    if let Err(e) = meta_store.put(&meta) {
+                        warn!("WAL rollback: failed to persist metadata for {env_id}: {e}");
+                    } else {
+                        debug!("WAL rollback: reset {env_id} state to {target_state}");
                     }
                 }
             }

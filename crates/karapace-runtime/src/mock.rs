@@ -107,14 +107,15 @@ impl RuntimeBackend for MockBackend {
         command: &[String],
     ) -> Result<std::process::Output, RuntimeError> {
         let stdout = format!("mock-exec: {}\n", command.join(" "));
-        // Create a real success ExitStatus portably
-        let success_status = std::process::Command::new("true")
-            .status()
-            .unwrap_or_else(|_| {
-                std::process::Command::new("/bin/true")
-                    .status()
-                    .expect("cannot execute /bin/true")
-            });
+
+        #[cfg(unix)]
+        let success_status = {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(0)
+        };
+
+        #[cfg(not(unix))]
+        let success_status = std::process::Command::new("true").status()?;
         Ok(std::process::Output {
             status: success_status,
             stdout: stdout.into_bytes(),

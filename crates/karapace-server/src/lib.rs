@@ -81,13 +81,19 @@ impl Store {
         let reg_path = self.data_dir.join("registry.json");
         fs::create_dir_all(&self.data_dir)?;
         fs::write(&reg_path, data)?;
-        let mut reg = self.registry.write().expect("registry lock poisoned");
+        let mut reg = match self.registry.write() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
         *reg = Some(data.to_vec());
         Ok(())
     }
 
     pub fn get_registry(&self) -> Option<Vec<u8>> {
-        let reg = self.registry.read().expect("registry lock poisoned");
+        let reg = match self.registry.read() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
         reg.clone()
     }
 }
@@ -152,14 +158,19 @@ fn respond_err(req: tiny_http::Request, code: u16, msg: &str) {
 }
 
 fn respond_octet(req: tiny_http::Request, data: Vec<u8>) {
-    let header =
-        Header::from_bytes("Content-Type", "application/octet-stream").expect("valid header");
-    let _ = req.respond(Response::from_data(data).with_header(header));
+    let mut resp = Response::from_data(data);
+    if let Ok(header) = Header::from_bytes("Content-Type", "application/octet-stream") {
+        resp = resp.with_header(header);
+    }
+    let _ = req.respond(resp);
 }
 
 fn respond_json(req: tiny_http::Request, json: impl Into<Vec<u8>>) {
-    let header = Header::from_bytes("Content-Type", "application/json").expect("valid header");
-    let _ = req.respond(Response::from_data(json.into()).with_header(header));
+    let mut resp = Response::from_data(json.into());
+    if let Ok(header) = Header::from_bytes("Content-Type", "application/json") {
+        resp = resp.with_header(header);
+    }
+    let _ = req.respond(resp);
 }
 
 fn read_body(req: &mut tiny_http::Request) -> Option<Vec<u8>> {
@@ -262,7 +273,13 @@ pub fn handle_request(store: &Store, req: tiny_http::Request) {
 
 /// Start the server loop, blocking the current thread.
 pub fn run_server(store: &Arc<Store>, addr: &str) {
-    let server = Server::http(addr).expect("failed to bind HTTP server");
+    let server = match Server::http(addr) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("failed to bind HTTP server on {addr}: {e}");
+            return;
+        }
+    };
     for request in server.incoming_requests() {
         handle_request(store, request);
     }

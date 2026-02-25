@@ -22,10 +22,10 @@ pub struct EnvIdentity {
 /// - Internal lookup during rebuild (to find old environments)
 ///
 /// After `build`, the env_id stored in metadata comes from the lock file.
-pub fn compute_env_id(normalized: &NormalizedManifest) -> EnvIdentity {
+pub fn compute_env_id(normalized: &NormalizedManifest) -> Result<EnvIdentity, serde_json::Error> {
     let mut hasher = blake3::Hasher::new();
 
-    hasher.update(normalized.canonical_json().as_bytes());
+    hasher.update(normalized.canonical_json()?.as_bytes());
 
     let base_digest = blake3::hash(normalized.base_image.as_bytes())
         .to_hex()
@@ -71,10 +71,10 @@ pub fn compute_env_id(normalized: &NormalizedManifest) -> EnvIdentity {
     let hex = hasher.finalize().to_hex().to_string();
     let short = hex[..12].to_owned();
 
-    EnvIdentity {
+    Ok(EnvIdentity {
         env_id: EnvId::new(hex),
         short_id: ShortId::new(short),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -110,7 +110,7 @@ packages = ["clang", "git"]
         .normalize()
         .unwrap();
 
-        assert_eq!(compute_env_id(&a), compute_env_id(&b));
+        assert_eq!(compute_env_id(&a).unwrap(), compute_env_id(&b).unwrap());
     }
 
     #[test]
@@ -141,7 +141,7 @@ packages = ["git", "cmake"]
         .normalize()
         .unwrap();
 
-        assert_ne!(compute_env_id(&a), compute_env_id(&b));
+        assert_ne!(compute_env_id(&a).unwrap(), compute_env_id(&b).unwrap());
     }
 
     #[test]
@@ -172,7 +172,7 @@ backend = "oci"
         .normalize()
         .unwrap();
 
-        assert_ne!(compute_env_id(&a), compute_env_id(&b));
+        assert_ne!(compute_env_id(&a).unwrap(), compute_env_id(&b).unwrap());
     }
 
     #[test]
@@ -188,7 +188,7 @@ image = "rolling"
         .normalize()
         .unwrap();
 
-        let id = compute_env_id(&n);
+        let id = compute_env_id(&n).unwrap();
         assert_eq!(id.short_id.as_str().len(), 12);
         assert!(id.env_id.as_str().starts_with(id.short_id.as_str()));
     }

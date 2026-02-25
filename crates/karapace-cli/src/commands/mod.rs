@@ -40,23 +40,26 @@ pub fn json_pretty(value: &impl serde::Serialize) -> Result<String, String> {
 
 pub fn spinner(msg: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg}")
-            .expect("valid template")
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-    );
+    let style = ProgressStyle::with_template("{spinner:.cyan} {msg}")
+        .unwrap_or_else(|_| ProgressStyle::default_spinner())
+        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
+    pb.set_style(style);
     pb.set_message(msg.to_owned());
     pb.enable_steady_tick(Duration::from_millis(80));
     pb
 }
 
 pub fn spin_ok(pb: &ProgressBar, msg: &str) {
-    pb.set_style(ProgressStyle::with_template("{msg}").expect("valid template"));
+    if let Ok(style) = ProgressStyle::with_template("{msg}") {
+        pb.set_style(style);
+    }
     pb.finish_with_message(format!("✓ {msg}"));
 }
 
 pub fn spin_fail(pb: &ProgressBar, msg: &str) {
-    pb.set_style(ProgressStyle::with_template("{msg}").expect("valid template"));
+    if let Ok(style) = ProgressStyle::with_template("{msg}") {
+        pb.set_style(style);
+    }
     pb.finish_with_message(format!("✗ {msg}"));
 }
 
