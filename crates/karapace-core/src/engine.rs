@@ -378,7 +378,17 @@ impl Engine {
             .get(env_id)
             .map_err(|_| CoreError::EnvNotFound(env_id.to_owned()))?;
 
-        validate_transition(meta.state, EnvState::Running)?;
+        if meta.state == EnvState::Running {
+            return Err(CoreError::Runtime(
+                karapace_runtime::RuntimeError::AlreadyRunning(env_id.to_owned()),
+            ));
+        }
+        if meta.state != EnvState::Built {
+            return Err(CoreError::InvalidTransition {
+                from: meta.state.to_string(),
+                to: "enter requires built state".to_owned(),
+            });
+        }
 
         let normalized = self.load_manifest(&meta.manifest_hash)?;
         let store_str = self.store_root_str.clone();
@@ -415,7 +425,17 @@ impl Engine {
             .get(env_id)
             .map_err(|_| CoreError::EnvNotFound(env_id.to_owned()))?;
 
-        validate_transition(meta.state, EnvState::Running)?;
+        if meta.state == EnvState::Running {
+            return Err(CoreError::Runtime(
+                karapace_runtime::RuntimeError::AlreadyRunning(env_id.to_owned()),
+            ));
+        }
+        if meta.state != EnvState::Built {
+            return Err(CoreError::InvalidTransition {
+                from: meta.state.to_string(),
+                to: "exec requires built state".to_owned(),
+            });
+        }
 
         let normalized = self.load_manifest(&meta.manifest_hash)?;
         let store_str = self.store_root_str.clone();

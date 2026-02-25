@@ -14,6 +14,9 @@ pub fn run(
     let _lock = StoreLock::acquire(&layout.lock_file()).map_err(|e| format!("store lock: {e}"))?;
 
     let resolved = resolve_env_id_pretty(engine, env_id)?;
-    engine.exec(&resolved, command).map_err(|e| e.to_string())?;
+    let short = resolved.get(..12).unwrap_or(&resolved);
+    engine
+        .exec(&resolved, command)
+        .map_err(|e| format!("{e} (env '{env_id}' -> {short})"))?;
     Ok(EXIT_SUCCESS)
 }
